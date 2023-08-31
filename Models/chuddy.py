@@ -9,8 +9,8 @@ import transformers
 from transformers import BertTokenizer
 import torch import nn
 import torch.nn.functional as F
-from models.qformer import BertConfig, BertModel, BertLMHeadModel
-from models.utils import init_tokenizer
+from Models.qformer import BertConfig, BertModel, BertLMHeadModel
+# from models.utils import init_tokenizer
 
 class LayerNorm(nn.LayerNorm):
     def forward(self,x:torch.Tensor):
@@ -49,7 +49,7 @@ class Chuddy(nn.Module):
         self.vision_proj = nn.Linear(vision_width,embed_dim)
         self.text_proj = nn.Linear(text_width,embed_dim)
         self.itm_head = nn.Linear(text_width,2)
-        
+        self.temp = 1
         #####==============Feature Functions===========#####
     def get_text_features(
             self,
