@@ -50,6 +50,7 @@ class Chuddy(nn.Module):
         self.qformer = BertLMHeadModel(config=encoder_config)
         text_width = self.encoder_config.hidden_size
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.lm_tokenizer = LlamaTokenizer.from_pretrained(config.llama_config)
         self.tokenizer.add_special_tokens({"bos_token":"[DEC]"})
         self.language_projection = nn.Linear(encoder_config.hidden_size,text_config.hidden_size) 
         self.language_model = language_model
@@ -219,7 +220,7 @@ class Chuddy(nn.Module):
         
         
         #######===========Language Modelling==============#######
-        decoder_input_ids = text_input.input_ids.clone()
+        decoder_input_ids = self.lm_tokenizer(caption)
         decoder_targets = decoder_input_ids.masked_fill(decoder_input_ids,-100)
         query_output = self.get_qformer_features(image)[0]
         language_model_inputs = self.language_projection(query_output)
