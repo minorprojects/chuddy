@@ -10,8 +10,9 @@ from transformers import BertTokenizer
 import torch import nn
 import torch.nn.functional as F
 from Models.qformer import BertConfig, BertModel, BertLMHeadModel
-# from models.utils import init_tokenizer
-
+#from models.utils import init_tokenizer
+from Models.configuration import VisionConfig, ModelConfig
+from transformers import LlamaForCausalLM,LlamaTokenizer,LlamaConfig
 class LayerNorm(nn.LayerNorm):
     def forward(self,x:torch.Tensor):
         orig_type = x.dtype
@@ -27,40 +28,45 @@ class Chuddy(nn.Module):
                  vit = '',
                  embed_dim=256,
                  pixel_values,
+                 num_query_tokens
                  ):
         super().__init__()
         
-        ########===========Qformer Configuration===============########
+        ########===========Qformer-Llama Configuration===============########
+        vision_width=
         encoder_config = BertConfig.from_pretrained('bert-base-uncased')
-        encoder_config.encoder_width = vision_width
+       # encoder_config.encoder_width = vision_width
         encoder_config.add_cross_attention = True
         encoder_config.cross_attention_freq = cross_attn_freq
         encoder.config.query_length = num_query_tokens
+        text_config = LlamaConfig.from_pretrained('')
+        self.text_config = text_config
         language_model = LlamaForCausalLM.from_pretrained('')
         
         ########===========submodule initialization==========###########
         self.visual_encoder = vit
         self.query_tokens = nn.Parameter(torch.zeros(1,num_query_tokens,encoder_config.hidden_size))
         self.qformer = BertLMHeadModel(config=encoder_config)
+        text_width = self.encoder_config.hidden_size
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        self.tokenizer.add-special_tokens({"bos_token":"[DEC]"})
-        self.language_projection = nn.Linear(encoder_coonfig.hidden_size,config.text_config.hidden_size) 
+        self.tokenizer.add_special_tokens({"bos_token":"[DEC]"})
+        self.language_projection = nn.Linear(encoder_config.hidden_size,text_config.hidden_size) 
         self.language_model = language_model
         self.vision_proj = nn.Linear(vision_width,embed_dim)
         self.text_proj = nn.Linear(text_width,embed_dim)
         self.itm_head = nn.Linear(text_width,2)
-        self.temp = 1
+        
         #####==============Feature Functions===========#####
     def get_text_features(
             self,
             input_ids: Optional[torch.Tensor] = None,
-            attention_mask,
-            decoder_input_ids,
-            decoder_attention_mask,
-            labels,
-            output_attentions,
-            output_hidden_states,
-            return_dict):
+            attention_mask: Optional[torch.Tensor]=None,
+            decoder_input_ids: Optional[torch.Tensor]=None,
+            decoder_attention_mask: Optional[torch.Tensor]=None,
+            labels: Optional[torch.Tensor]=None,
+            output_attentions: Optional[bool]=None,
+            output_hidden_states: Optional[bool]=None,
+            return_dict: Optional[bool]=None):
         output_attentions = output_attentions
         output_hidden_states = output_hidden_states
         return_dict = return_dict
@@ -74,10 +80,10 @@ class Chuddy(nn.Module):
         
     def get_image_features(
             self,
-            pixel_values,
-            output_attentions,
-            output_hidden_states,
-            return_dict):
+            pixel_values: Optional[torch.FloatTensor]=None,
+            output_attentions: Optional[bool]=None,
+            output_hidden_states: Optional[bool]=None,
+            return_dict: Optional[bool]=None):
         output_attentions = output_attentions
         output_hidden_states = output_hidden_states
         return_dict = return_dict
@@ -94,7 +100,7 @@ class Chuddy(nn.Module):
             self,
             input_ids: Optional[torch.FloatTensor]=None,
             pixel_values: Optional[torch.FloatTensor]=None,
-            attention_mask=None
+            attention_mask: Optional[torch.Tensor]=None,
             output_attentions: Optional[bool]=None,
             output_hidden_states: Optional[bool]=None,
             return_dict: Optional[bool]=None):
@@ -112,7 +118,7 @@ class Chuddy(nn.Module):
                                           device=image.device)
         query_tokens = self.query_tokens.expand(image_embeds.shape[0],-1,-1)
         query_outputs = self.qformer(
-            input_ids=None,
+            input_ids=input_ids,
             attention_mask=attention_mask,
             query_embeds=query_tokens,
             encoder_hidden_states=image_embeds,
@@ -125,7 +131,12 @@ class Chuddy(nn.Module):
     
     #####=================Model's Forward Method ==============##########
     
-    def forward(self,image,caption):
+    def forward(self,
+                image,
+                caption,
+                output_attentions: Optional[bool]=None,
+                output_hidden_states: Optional[bool]=None,
+                return_dict: Optional[bool]=None):
         
         text_input = self.tokenizer(caption,
                                     padding='max_length',
@@ -133,10 +144,10 @@ class Chuddy(nn.Module):
                                     max_length=35,
                                     return_tensors='pt').to(image.device)
         text_features = self.qformer_features(input_ids=text_input.input_ids,
-                                           pixel_values, 
-                                           output_attentions, 
-                                           output_hidden_states, 
-                                           return_dict)
+                                           pixel_values=image, 
+                                           output_attentions=output_attentions, 
+                                           output_hidden_states=output_hidden_states, 
+                                           return_dict=return_dict)
         text_embeds = F.normalize(self.text_proj(text_features.last_hidden_state[:,0,:]),dim=-1)
      
         image_features = self.get_image_features(image)
@@ -160,11 +171,11 @@ class Chuddy(nn.Module):
         bs = image.size(0)
         output_pos = get_qformer_features(
             input_ids=text_input.input_ids,
-            image,
+            pixel_values=image,
             attention_mask=text_input.attention_mask,
-            output_attentions,
-            output_hidden_states,
-            return_dict,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
             )
         with torch.no_grad():
             weights_t2i = F.softmax(sim_t2i[:,:bs],dim=1)+1e-4
@@ -192,7 +203,7 @@ class Chuddy(nn.Module):
         image_embeds_all = torch.cat([image_embeds_neg,image_embeds],dim=0)
         image_atts_all = torch.cat([image_atts,image_atts],dim=0)
         output_neg = self.get_qformer_features(
-            text_ids_all,
+            input_ids=text_ids_all,
             attention_mask = text_atts_all,
             encoder_hidden_states=image_embeds_all,
             encoder_attention_mask=image_atts_all,
@@ -234,7 +245,7 @@ class Chuddy(nn.Module):
         shift_logits = logits[...,:-1,:].contiguous()
         shift_labels = labels[...,1:].contiguous().to(logits.device)
         loss_fct = F.cross_entropy(reduction='mean')
-        loss_lm = loss_fct(shift_logits.view(-1,self.config.text-config.vocab_size),shift_labels.view(-1))
+        loss_lm = loss_fct(shift_logits.view(-1,self.text_config.vocab_size),shift_labels.view(-1))
         return loss_itc,loss_itm,loss_lm
     
                
