@@ -181,7 +181,7 @@ class Chuddy(nn.Module):
         with torch.no_grad():
             weights_t2i = F.softmax(sim_t2i[:,:bs],dim=1)+1e-4
             weights_t2i.fill_diagonal_(0)
-            weights_i2t = F.sformax(sim_i2t[:,:bs],dim=1)+1e-4
+            weights_i2t = F.softmax(sim_i2t[:,:bs],dim=1)+1e-4
             weights_i2t.fill_diagonal_(0)
         
         #select a negative image for each text
