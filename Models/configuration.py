@@ -1,7 +1,7 @@
 # Model configuration class for the Visual encoder, qformer and Language model
 
 import torch
-
+from torch import nn
 class ModelConfig(nn.Module):
   def __init__(self,
                bert_config = 'bert-base-uncased',
