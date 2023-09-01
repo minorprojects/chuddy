@@ -13,7 +13,7 @@ from Models.qformer import BertConfig, BertModel, BertLMHeadModel
 from Models.configuration import  ModelConfig     ## not yet fully implemented
 from Models.visual_model import BeitModel,BeitConfig
 from transformers import LlamaForCausalLM,LlamaTokenizer,LlamaConfig
-
+import logging
 # Don't know why i implemented this tbh but i'm hoping to use it somewhere
 class LayerNorm(nn.LayerNorm):
     def forward(self,x:torch.Tensor):
@@ -29,10 +29,11 @@ class Chuddy(nn.Module):
                  image_size = 224,
                  embed_dim=256,
                  pixel_values,
-                 num_query_tokens
+                 num_query_tokens,
+                 freeze_vit=True,
+                 prompt= "",
                  ):
         super().__init__()
-        
         ########===========Qformer-Llama Configuration===============########
         visual_config = BeitConfig.from_pretrained(config.beit_config)
         encoder_config = BertConfig.from_pretrained(config.bert_config)
@@ -51,13 +52,26 @@ class Chuddy(nn.Module):
         text_width = self.encoder_config.hidden_size
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         self.lm_tokenizer = LlamaTokenizer.from_pretrained(config.llama_config)
+        self.lm_tokenizer.add_special_tokens({'pad_token':'[PAD]'})
+        self.lm_tokenizer.add_special_tokens({'bos_token':'</s>'})
+        self.lm_tokenizer.add_special_tokens({'eos_token':'</s>'})
+        self.lm_tokenizer.add_special_tokens({'unk_token':'</s>'})
         self.tokenizer.add_special_tokens({"bos_token":"[DEC]"})
         self.language_projection = nn.Linear(encoder_config.hidden_size,text_config.hidden_size) 
         self.language_model = language_model
+        self.language_model.resize_token_embeddings(len(self.lm_tokenizer))
         self.vision_proj = nn.Linear(vision_width,embed_dim)
         self.text_proj = nn.Linear(text_width,embed_dim)
         self.itm_head = nn.Linear(text_width,2)
-        
+
+        if freeze_vit:
+            for name,param in self.visual_encoder.named_parameters():
+                param.requires_grad = False
+            self.visual_encoder = self.visual_encoder.eval()
+            logging.info('freeze_vit enabled')
+        for name,param in self.language_model.named_parameters():
+            param.requires_grad = False
+            logging.info('frozen LLM enabled')
         #####==============Feature Functions===========#####
     def get_text_features(
             self,
