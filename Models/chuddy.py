@@ -2,7 +2,7 @@
 """
 Created on Sun Aug 27 17:18:40 2023
 
-@author: debian-os
+@author: Chima Emmanuel
 """
 import torch
 import transformers
@@ -10,9 +10,11 @@ from transformers import BertTokenizer
 import torch import nn
 import torch.nn.functional as F
 from Models.qformer import BertConfig, BertModel, BertLMHeadModel
-#from models.utils import init_tokenizer
-from Models.configuration import VisionConfig, ModelConfig
+from Models.configuration import VisionConfig, ModelConfig     ## not yet implemented
+from Models.visual_model import BeitModel,BeitConfig
 from transformers import LlamaForCausalLM,LlamaTokenizer,LlamaConfig
+
+# Don't know why i implemented this tbh but i'm hoping to use it somewhere
 class LayerNorm(nn.LayerNorm):
     def forward(self,x:torch.Tensor):
         orig_type = x.dtype
@@ -20,12 +22,11 @@ class LayerNorm(nn.LayerNorm):
         return ret.type(orig_type)
 
 
-
+# Main Model class
 class Chuddy(nn.Module):
     def __init__(self,
-                 config = '',
+                 config = ModelConfig(),
                  image_size = 224,
-                 vit = '',
                  embed_dim=256,
                  pixel_values,
                  num_query_tokens
@@ -33,18 +34,18 @@ class Chuddy(nn.Module):
         super().__init__()
         
         ########===========Qformer-Llama Configuration===============########
-        vision_width=
-        encoder_config = BertConfig.from_pretrained('bert-base-uncased')
+        visual_config = BeitConfig.from_pretrained(config.beit_config)
+        encoder_config = BertConfig.from_pretrained(config.bert_config)
        # encoder_config.encoder_width = vision_width
         encoder_config.add_cross_attention = True
         encoder_config.cross_attention_freq = cross_attn_freq
         encoder.config.query_length = num_query_tokens
-        text_config = LlamaConfig.from_pretrained('')
+        text_config = LlamaConfig.from_pretrained(config.llama_config)
         self.text_config = text_config
-        language_model = LlamaForCausalLM.from_pretrained('')
+        language_model = LlamaForCausalLM.from_pretrained(text_config)
         
         ########===========submodule initialization==========###########
-        self.visual_encoder = vit
+        self.visual_encoder = BeitModel(visual_config)
         self.query_tokens = nn.Parameter(torch.zeros(1,num_query_tokens,encoder_config.hidden_size))
         self.qformer = BertLMHeadModel(config=encoder_config)
         text_width = self.encoder_config.hidden_size
