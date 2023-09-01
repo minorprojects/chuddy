@@ -10,7 +10,7 @@ from transformers import BertTokenizer
 import torch import nn
 import torch.nn.functional as F
 from Models.qformer import BertConfig, BertModel, BertLMHeadModel
-from Models.configuration import VisionConfig, ModelConfig     ## not yet implemented
+from Models.configuration import  ModelConfig     ## not yet fully implemented
 from Models.visual_model import BeitModel,BeitConfig
 from transformers import LlamaForCausalLM,LlamaTokenizer,LlamaConfig
 
