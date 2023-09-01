@@ -145,8 +145,7 @@ class Chuddy(nn.Module):
                                     truncation=True,
                                     max_length=35,
                                     return_tensors='pt').to(image.device)
-        text_features = self.qformer_features(input_ids=text_input.input_ids,
-                                           pixel_values=image, 
+        text_features = self.get_text_features(input_ids=text_input.input_ids,
                                            output_attentions=output_attentions, 
                                            output_hidden_states=output_hidden_states, 
                                            return_dict=return_dict)
@@ -227,13 +226,14 @@ class Chuddy(nn.Module):
         language_model_attention_mask = torch.ones(
             language_model_inputs.size()[:-1],dtype=torch.long,device=language_model_inputs.device
             )
+        
         input_embeds = self.language_model.get_input_embeddings()(decoder_input_ids)
         input_embeds = torch.cat([language_model_inputs,inputs_embeds],dim=1)
         if attention_mask is None:
             attention_mask = torch.ones_like(input_ids)
         expected_device = language_model_attention_mask.device
         attention_mask = torch.cat([language_model_attention_mask,
-                                    attention_mask.to(expected_device)],dim=1)
+                                    decoder_input_ids.attention_mask.to(expected_device)],dim=1)
         outputs = self.language_model(
             inputs_embeds=input_embeds,
             attention_mask=attention_mask,
@@ -247,8 +247,9 @@ class Chuddy(nn.Module):
         shift_logits = logits[...,:-1,:].contiguous()
         shift_labels = labels[...,1:].contiguous().to(logits.device)
         loss_fct = F.cross_entropy(reduction='mean')
+        loss_hyp = outputs.loss
         loss_lm = loss_fct(shift_logits.view(-1,self.text_config.vocab_size),shift_labels.view(-1))
-        return loss_itc,loss_itm,loss_lm
+        return loss_itc,loss_itm,loss_lm,loss_hyp
     
                
 
