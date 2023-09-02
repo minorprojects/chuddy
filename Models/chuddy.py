@@ -283,8 +283,27 @@ class Chuddy(nn.Module):
         loss_hyp = outputs.loss
         loss_lm = loss_fct(shift_logits.view(-1,self.text_config.vocab_size),shift_labels.view(-1))
         return loss_itc,loss_itm,loss_lm,loss_hyp
+    ######==============model's generate function===========########
+    @torch.no_grad()
     def generate(self,
+                 image,
+                 prompt,
+                 max_length=256,
+                 min_length=1,
+                 temperature=1
                 ):
+        self.lm_tokenizer.padding_size = 'left'
+        prompt = self.prompt
+        image = image
+        bs = image.size(0)
+        query_tokens = self.query_tokens.expand(bs,-1,-1)
+        text_qformer = self.tokenizer(
+            prompt,
+            padding='longest',
+            truncation=True,
+            max_length=self.max_text_length,
+            return_tensors='pt')
+        
         
     
                
