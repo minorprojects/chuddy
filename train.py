@@ -14,7 +14,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 model = Chuddy()
 model = model.to(device)
 save_path= 
-
+epochs
 
 
 def train(model,devivce,data_loader,epochs):
@@ -34,7 +34,9 @@ def train(model,devivce,data_loader,epochs):
     print('epoch {} step {} loss: {}'.format(epoch,i + 1, total_loss))
 return total_loss
 
-torch.save(model_state_dict(),save_path)
+torch.save({
+  'epoch': epochs,
+  model_state_dict()},save_path)
     
     
 
