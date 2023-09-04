@@ -8,7 +8,7 @@ import torch
 import transformers
 from transformers import BertTokenizer
 from typing import Union,Tuple,Optional,Any
-import torch import nn
+from torch import nn
 import torch.nn.functional as F
 from Models.qformer import BertConfig, BertModel, BertLMHeadModel
 from Models.configuration import  ModelConfig     ## not yet fully implemented
@@ -26,11 +26,11 @@ class LayerNorm(nn.LayerNorm):
 # Main Model class
 class Chuddy(nn.Module):
     def __init__(self,
+                 pixel_values: Optional[torch.FloatTensor]=None,
                  config = ModelConfig(),
                  image_size = 224,
                  embed_dim=256,
-                 pixel_values,
-                 num_query_tokens,
+                 num_query_tokens=32,
                  freeze_vit=True,
                  prompt= "",
                  cross_attn_freq=None,
@@ -301,7 +301,7 @@ class Chuddy(nn.Module):
             image = image
             bs = image.size(0)
             query_tokens = self.query_tokens.expand(bs,-1,-1)
-            text_qformer = self.tokenizer(
+           # text_qformer = self.tokenizer(
             image_embeds = get_image_features(image,return_dict=True)
             image_attention_mask = torch.ones(image_embeds.size()[:-1],dtype=torch.long,device=image_embeds.device)
             query_tokens = self.query_tokens.expand(image_embeds.shape[0],-1,-1)
@@ -324,12 +324,12 @@ class Chuddy(nn.Module):
                 input_embeds=input_embeds,
                 attention_mask=attention_mask,
                 **generate_kwargs)
-         input_embeds = self.get_text_features(prompt)
-         outputs = self.langauge_model.generate(
+        input_embeds = self.get_text_features(prompt)
+        outputs = self.langauge_model.generate(
                 input_embeds=input_embeds,
                 attention_mask=attention_mask,
                 **generate_kwargs)
-         return outputs
+        return outputs
         
         
     
