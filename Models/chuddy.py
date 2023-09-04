@@ -7,6 +7,7 @@ Created on Sun Aug 27 17:18:40 2023
 import torch
 import transformers
 from transformers import BertTokenizer
+from typing import Union,Tuple,Optional,Any
 import torch import nn
 import torch.nn.functional as F
 from Models.qformer import BertConfig, BertModel, BertLMHeadModel
