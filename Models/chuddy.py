@@ -286,23 +286,49 @@ class Chuddy(nn.Module):
     ######==============model's generate function===========########
     @torch.no_grad()
     def generate(self,
-                 image,
-                 prompt,
+                 image: Optional[torch.FloatTensor]=None,
+                 prompt: Optional[torch.LongTensor]=None,
                  max_length=256,
                  min_length=1,
-                 temperature=1
+                 temperature=1,
+                 attention_mask: Optional[torch.LongTensor]=None,
+                 **generate_kwargs,
                 ):
         self.lm_tokenizer.padding_size = 'left'
-        prompt = self.prompt
-        image = image
-        bs = image.size(0)
-        query_tokens = self.query_tokens.expand(bs,-1,-1)
-        text_qformer = self.tokenizer(
-            prompt,
-            padding='longest',
-            truncation=True,
-            max_length=self.max_text_length,
-            return_tensors='pt')
+        if image is not None:
+            prompt = self.prompt
+            image = image
+            bs = image.size(0)
+            query_tokens = self.query_tokens.expand(bs,-1,-1)
+            text_qformer = self.tokenizer(
+            image_embeds = get_image_features(image,return_dict=True)
+            image_attention_mask = torch.ones(image_embeds.size()[:-1],dtype=torch.long,device=image_embeds.device)
+            query_tokens = self.query_tokens.expand(image_embeds.shape[0],-1,-1)
+            query_outputs = self.qformer_features(query_embeds=query_tokens,
+                                                  encoder_hidden_states=image_embeds,
+                                                  encoder_attention_mask=image_attention_mask,
+                                                  return_dict=True)
+            query_output = query_outputs.last_hidden_state
+            language_model_inputs = self.language_projection(query_output)
+            language_attention_mask = torch.ones(language_model_input.size()[:-1],dtype=torch.long,device=language_model_inputs.device)
+            if prompt is None:
+                prompt = (torch.LongTensor([[self.config.text_config.bos_token_id]]).repeat(bs,1).to(image_embeds.device))
+            if attention_mask is None:
+                attention_mask = torch.ones_like(prompt)
+            attention_mask = torch.cat([language_attention_mask,attention_mask.to(language_attention_mask.device)],dim=1)
+            input_embeds = self.get_text_features(prompt)
+            #concatenate query_embeddinf with prompt embedding
+            input_embeds = torch.cat([language_model_inputs,input_embeds.to(language_model_inputs.device)],dim=1)
+            outputs = self.langauge_model.generate(
+                input_embeds=input_embeds,
+                attention_mask=attention_mask,
+                **generate_kwargs)
+         input_embeds = self.get_text_features(prompt)
+         outputs = self.langauge_model.generate(
+                input_embeds=input_embeds,
+                attention_mask=attention_mask,
+                **generate_kwargs)
+         return outputs
         
         
     
