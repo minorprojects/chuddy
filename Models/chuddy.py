@@ -42,7 +42,7 @@ class Chuddy(nn.Module):
        # encoder_config.encoder_width = vision_width
         encoder_config.add_cross_attention = True
         encoder_config.cross_attention_freq = cross_attn_freq
-        encoder.config.query_length = num_query_tokens
+        encoder_config.query_length = num_query_tokens
         text_config = LlamaConfig.from_pretrained(config.llama_config)
         self.text_config = text_config
         language_model = LlamaForCausalLM.from_pretrained(text_config)
