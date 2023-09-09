@@ -1,5 +1,5 @@
 import torch
-import torch.nn.Functional as F
+import torch.nn.functional as F
 from torch import nn
 from datasets import load_dataset
 import transformers
@@ -8,20 +8,20 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from Models.chuddy import Chuddy
 from utils import (
-  lr,
-  epochs,
-  save_path,
-  data_link,
+  LEARNING_RATE,
+  EPOCHS,
+   SAVE_PATH,
+  DATA_LINK,
 )
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-lr = 0.001
+lr = LEARNING_RATE
 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 model = Chuddy()
 model = model.to(device)
-save_path= save_path
-epochs=epochs
+save_path= SAVE_PATH
+epochs=EPOCHS
 
-data = load_dataset(data_link)
+data = load_dataset(DATA_LINK)
 
 data_loader = DataLoader(data,batched=True) 
 
