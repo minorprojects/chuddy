@@ -27,6 +27,7 @@ class LayerNorm(nn.LayerNorm):
 class Chuddy(nn.Module):
     def __init__(self,
                  pixel_values: Optional[torch.FloatTensor]=None,
+                 qformer_model,
                  config = ModelConfig(),
                  image_size = 224,
                  embed_dim=256,
@@ -184,65 +185,65 @@ class Chuddy(nn.Module):
        
         #######=============Image-Text-Contrastive==============#############
         
-        sim_i2t = (image_embeds @ text_embeds.t()) / self.temp
-        sim_t2i = (text_embeds @ image_embeds.t()) / self.temp
-        image_sim = image_embeds @ image_embeds.T
-        text_sim = text_embeds @ text_embeds.T
-        targets = F.softmax(
-            (image_sim + text_sim) / 2 * self.temp,dim=-1)
-        text_loss = nn.CrossEntropyLoss()(sim_t2i,targets).mean()
-        image_loss = nn.CrossEntropyLoss()(sim_i2t,targets.T).mean()
-        loss_itc = (image_loss + text_loss) /2.0
+        # sim_i2t = (image_embeds @ text_embeds.t()) / self.temp
+        # sim_t2i = (text_embeds @ image_embeds.t()) / self.temp
+        # image_sim = image_embeds @ image_embeds.T
+        # text_sim = text_embeds @ text_embeds.T
+        # targets = F.softmax(
+        #     (image_sim + text_sim) / 2 * self.temp,dim=-1)
+        # text_loss = nn.CrossEntropyLoss()(sim_t2i,targets).mean()
+        # image_loss = nn.CrossEntropyLoss()(sim_i2t,targets.T).mean()
+        # loss_itc = (image_loss + text_loss) /2.0
         
         #######================Image-Text-Matching==============#######
         #Adapted from salesforce blip_pretrain image-text matching
-        bs = image.size(0)
-        output_pos = qformer_features(
-            input_ids=text_input.input_ids,
-            pixel_values=image,
-            attention_mask=text_input.attention_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-            )
-        with torch.no_grad():
-            weights_t2i = F.softmax(sim_t2i[:,:bs],dim=1)+1e-4
-            weights_t2i.fill_diagonal_(0)
-            weights_i2t = F.softmax(sim_i2t[:,:bs],dim=1)+1e-4
-            weights_i2t.fill_diagonal_(0)
+        # bs = image.size(0)
+        # output_pos = qformer_features(
+        #     input_ids=text_input.input_ids,
+        #     pixel_values=image,
+        #     attention_mask=text_input.attention_mask,
+        #     output_attentions=output_attentions,
+        #     output_hidden_states=output_hidden_states,
+        #     return_dict=return_dict,
+        #     )
+        # with torch.no_grad():
+        #     weights_t2i = F.softmax(sim_t2i[:,:bs],dim=1)+1e-4
+        #     weights_t2i.fill_diagonal_(0)
+        #     weights_i2t = F.softmax(sim_i2t[:,:bs],dim=1)+1e-4
+        #     weights_i2t.fill_diagonal_(0)
         
         #select a negative image for each text
-        image_embeds_neg = []
-        for b in range(bs):
-            neg_idx = torch.multinomial(weights_t2i[b],1).item()
-            image_embed_neg.append(image_embeds[neg_idx])
-        image_embeds_neg = torch.stack(image_embeds_neg,dim=0)
-        #select a negative text for each image
-        text_ids_neg = []
-        text_atts_neg = []
-        for b in range(bs):
-            neg_idx = torch.multinomial(weights_i2t[b],1).item()
-            text_ids_neg.append(text_input.input_ids[neg_idx])
-            text_atts_neg.append(text_input.input_ids.attention_mask[neg_idx])
-        text_ids_neg = torch.stack(text_ids_neg,dim=0)
-        text_atts_neg = torch.stack(text_atts_neg,dim=0)
-        text_ids_all = torch.cat([text_input.input_ids,text_ids_neg],dim=0)
-        text_atts_all = torch.cat([text_input.attention_mask,text_atts_neg],dim=0)
-        image_embeds_all = torch.cat([image_embeds_neg,image_embeds],dim=0)
-        image_atts_all = torch.cat([image_atts,image_atts],dim=0)
-        output_neg = self.qformer_features(
-            input_ids=text_ids_all,
-            attention_mask = text_atts_all,
-            encoder_hidden_states=image_embeds_all,
-            encoder_attention_mask=image_atts_all,
-            return_dict =True
-            )
-        vl_embeddings = torch.cat([output_pos.last_hidden_state[:,0,:],
-                                   output_neg.last_hidden_state[:,0,:]],dim=0)
-        vl_output = self.itm_head(vl_embeddings)
-        itm_labels = torch.cat([torch.ones(bs,dtype=torch.long),
-                                torch.zeros(2*bs,dtype=torch.long)],dim=0).to(image.device)
-        loss_itm = F.cross_entropy(vl_output,itm_labels)
+        # image_embeds_neg = []
+        # for b in range(bs):
+        #     neg_idx = torch.multinomial(weights_t2i[b],1).item()
+        #     image_embed_neg.append(image_embeds[neg_idx])
+        # image_embeds_neg = torch.stack(image_embeds_neg,dim=0)
+        # #select a negative text for each image
+        # text_ids_neg = []
+        # text_atts_neg = []
+        # for b in range(bs):
+        #     neg_idx = torch.multinomial(weights_i2t[b],1).item()
+        #     text_ids_neg.append(text_input.input_ids[neg_idx])
+        #     text_atts_neg.append(text_input.input_ids.attention_mask[neg_idx])
+        # text_ids_neg = torch.stack(text_ids_neg,dim=0)
+        # text_atts_neg = torch.stack(text_atts_neg,dim=0)
+        # text_ids_all = torch.cat([text_input.input_ids,text_ids_neg],dim=0)
+        # text_atts_all = torch.cat([text_input.attention_mask,text_atts_neg],dim=0)
+        # image_embeds_all = torch.cat([image_embeds_neg,image_embeds],dim=0)
+        # image_atts_all = torch.cat([image_atts,image_atts],dim=0)
+        # output_neg = self.qformer_features(
+        #     input_ids=text_ids_all,
+        #     attention_mask = text_atts_all,
+        #     encoder_hidden_states=image_embeds_all,
+        #     encoder_attention_mask=image_atts_all,
+        #     return_dict =True
+        #     )
+        # vl_embeddings = torch.cat([output_pos.last_hidden_state[:,0,:],
+        #                            output_neg.last_hidden_state[:,0,:]],dim=0)
+        # vl_output = self.itm_head(vl_embeddings)
+        # itm_labels = torch.cat([torch.ones(bs,dtype=torch.long),
+        #                         torch.zeros(2*bs,dtype=torch.long)],dim=0).to(image.device)
+        # loss_itm = F.cross_entropy(vl_output,itm_labels)
         
         
         #######===========Language Modelling==============#######
