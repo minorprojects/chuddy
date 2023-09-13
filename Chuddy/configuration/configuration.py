@@ -5,7 +5,7 @@ from torch import nn
 class ModelConfig(nn.Module):
   def __init__(self,
                bert_config = 'bert-base-uncased',
-               llama_config = '',
+               llama_config = 'meta-llama/Llama-2-13b-chat-hf',
                beit_config = 'microsoft/beit-base-patch16-224-pt22k'
               ):
                 super().__init__()
