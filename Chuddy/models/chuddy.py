@@ -10,31 +10,37 @@ from transformers import BertTokenizer
 from typing import Union,Tuple,Optional,Any
 from torch import nn
 import torch.nn.functional as F
-from Models.qformer import BertConfig, BertModel, BertLMHeadModel
-from Models.configuration import  ModelConfig     ## not yet fully implemented
-from Models.visual_model import BeitModel,BeitConfig
+from Chuddy.models.qformer import BertConfig, BertModel, BertLMHeadModel
+from Chuddy.configuration.configuration import  ModelConfig     ## not yet fully implemented
+from Chuddy.models.visual_model import BeitModel,BeitConfig
 from transformers import LlamaForCausalLM,LlamaTokenizer,LlamaConfig
 import logging
-# Don't know why i implemented this tbh but i'm hoping to use it somewhere
-class LayerNorm(nn.LayerNorm):
-    def forward(self,x:torch.Tensor):
-        orig_type = x.dtype
-        ret = super().forward(x.type(torch.float32))
-        return ret.type(orig_type)
-
-
+from Chuddy.models.modelling_blip2 import Blip2Base,disabled_train
+from Chuddy.utils.registry import registry
+from peft import (
+LoraConfig,
+get-peft_model,
+get_peft_model_state_dict,
+prepare_model_for_int8_training,
+set_peft_model_state_dict,
+)
 # Main Model class
-class Chuddy(nn.Module):
+class Chuddy(Blip2Base):
     def __init__(self,
-                 pixel_values: Optional[torch.FloatTensor]=None,
-                 qformer_model,
+                 qformer_model='https://storage.googleapis.com/sfr-vision-language_research/LAVIS/models/BLIP@/blip2_pretrained_flant5xxl.pth',
                  config = ModelConfig(),
                  image_size = 224,
                  embed_dim=256,
                  num_query_tokens=32,
                  freeze_vit=True,
+                 freeze_qformer=True,
                  prompt= "",
                  cross_attn_freq=None,
+                 device_8bit=0,
+                 lora_r=0,
+                 lora_target_modules=['q_proj','v_proj'],
+                 lora_alpha=16,
+                 lora_dropout=0.05,
                  ):
         super().__init__()
         ########===========Qformer-Llama Configuration===============########
@@ -72,6 +78,7 @@ class Chuddy(nn.Module):
             for name,param in self.visual_encoder.named_parameters():
                 param.requires_grad = False
             self.visual_encoder = self.visual_encoder.eval()
+            
             logging.info('freeze_vit enabled')
         for name,param in self.language_model.named_parameters():
             param.requires_grad = False
