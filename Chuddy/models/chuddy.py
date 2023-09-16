@@ -10,6 +10,10 @@ from transformers import BertTokenizer
 from typing import Union,Tuple,Optional,Any
 from torch import nn
 import torch.nn.functional as F
+from Chuddy.models.imagebind import *
+from Chuddy.models.diffusion_pipelines.sd_pipeline import StableDiffusionPipeline
+from Chuddy.models.diffusion_pipelines.ad_pipeline import AudioLDM2Pipeline
+from Chuddy.models.diffusion_pipelines.vd_pipeline import TextToVideoSDPipeline
 from Chuddy.models.qformer import BertConfig, BertModel, BertLMHeadModel
 from Chuddy.configuration.configuration import  ModelConfig     ## not yet fully implemented
 from Chuddy.models.visual_model import BeitModel,BeitConfig
