@@ -29,66 +29,105 @@ prepare_model_for_int8_training,
 set_peft_model_state_dict,
 )
 # Main Model class
-class Chuddy(Blip2Base):
+class Chuddy(nn.Module):
     def __init__(self,
-                 qformer_model='https://storage.googleapis.com/sfr-vision-language_research/LAVIS/models/BLIP@/blip2_pretrained_flant5xxl.pth',
                  config = ModelConfig(),
-                 image_size = 224,
-                 embed_dim=256,
-                 num_query_tokens=32,
-                 freeze_vit=True,
-                 freeze_qformer=True,
                  prompt= "",
-                 cross_attn_freq=None,
                  device_8bit=0,
                  lora_r=0,
                  lora_target_modules=['q_proj','v_proj'],
                  lora_alpha=16,
                  lora_dropout=0.05,
+                 **args,
                  ):
-        super().__init__()
-        ########===========Qformer-Llama Configuration===============########
-        visual_config = BeitConfig.from_pretrained(config.beit_config)
-        encoder_config = BertConfig.from_pretrained(config.bert_config)
-       # encoder_config.encoder_width = vision_width
-        encoder_config.add_cross_attention = True
-        encoder_config.cross_attention_freq = cross_attn_freq
-        encoder_config.query_length = num_query_tokens
+        super(Chuddy,self).__init__()
+        self.args = args
+        ########===========Llama Configuration===============########
         text_config = LlamaConfig.from_pretrained(config.llama_config)
         self.text_config = text_config
         language_model = LlamaForCausalLM.from_pretrained(text_config)
         
         ########===========submodule initialization==========###########
-        self.visual_encoder = BeitModel(visual_config)
-        self.query_tokens = nn.Parameter(torch.zeros(1,num_query_tokens,encoder_config.hidden_size))
-        self.qformer = BertLMHeadModel(config=encoder_config)
-        text_width = self.encoder_config.hidden_size
-        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.visual_encoder, self.visual_hidden_size = imagebind_model.imagebind_huge(pretrained=True, store_path=imagebind_ckpt_path)
         self.lm_tokenizer = LlamaTokenizer.from_pretrained(config.llama_config)
         self.lm_tokenizer.add_special_tokens({'pad_token':'[PAD]'})
         self.lm_tokenizer.add_special_tokens({'bos_token':'</s>'})
         self.lm_tokenizer.add_special_tokens({'eos_token':'</s>'})
         self.lm_tokenizer.add_special_tokens({'unk_token':'</s>'})
         self.tokenizer.add_special_tokens({"bos_token":"[DEC]"})
-        self.language_projection = nn.Linear(encoder_config.hidden_size,text_config.hidden_size) 
+        self._add_image_token()
+        self._add_video_token()
+        self._add_audio_token()
+        self.language_projection = nn.Linear(self.visual_hidden_size,self.language_model.config.hidden_size) 
         self.language_model = language_model
         self.language_model.resize_token_embeddings(len(self.lm_tokenizer))
-        self.vision_proj = nn.Linear(vision_width,embed_dim)
-        self.text_proj = nn.Linear(text_width,embed_dim)
-        self.itm_head = nn.Linear(text_width,2)
-        self.max_text_length = 256
 
-        if freeze_vit:
-            for name,param in self.visual_encoder.named_parameters():
-                param.requires_grad = False
-            self.visual_encoder = self.visual_encoder.eval()
-            
-            logging.info('freeze_vit enabled')
-        for name,param in self.language_model.named_parameters():
+        # freeze vision encoder
+        for name,param in self.visual_encoder.named_parameters():
             param.requires_grad = False
+        self.visual_encoder = self.visual_encoder.eval()
+            
+        logging.info('frozen_vis_encoder enabled')
+        if self.args['freeze_lm']:
+            for name,param in self.language_model.named_parameters():
+                param.requires_grad = False
+            self.language_model.eval()
             logging.info('frozen LLM enabled')
+        else:
+            print('lora tuning Llama')
+            peft_config = LoraConfig(
+                task_type=TaskType.CAUSAL_LM,
+                inference_mode=False,
+                r=lora_r,
+                lora_alpha = lora_alpha,
+                lora_dropout=lora_dropout,
+                target_modules=lora_target_modules)
+            self.language_model = get_peft_model(self.language_model,peft_config)
+            self.language_model.print_trainable_parameters()
+        print('LLM initialized')
+        if self.args['freeze_input_proj']:
+            for param in self.language_projection.parameters():
+                params.requires_grad=False
+        self.input_embeddings = self.language_model.get_input_embeddings()
+                     
         #####==============Feature Functions===========#####
-    def get_text_features(
+    def _add_image_token(self):
+        self.lm_tokenizer.add_tokens({"<Img>"})
+        self.lm_tokenizer.add_tokens({"</Img>"})
+        # add [img] tokens to vocab
+        self.args['gen_img_token_idx']= []
+        for i in range(self.args['num_gen_img_tokens']):
+            print('adding image tokens to vocab')
+            num_added_tokens = self.lm_tokenizer.add_tokens(f'[IMG{i}]')
+            gen_token_idx = self.lm_tokenizer(f'[IMG{i}]', add_special_tokens=False).input_ids
+            assert len(gen_token_idx) == 1, gen_token_idx
+            self.args['gen_img_token_idx'].append(gen_token_idx[0])
+            
+    def _add_video_token(self):
+        self.lm_tokenizer.add_tokens({"<Vid>"})
+        self.lm_tokenizer.add_tokens({"</Vid>"})
+        # add [img] tokens to vocab
+        self.args['gen_vid_token_idx']= []
+        for i in range(self.args['num_gen_vid_tokens']):
+            print('adding image tokens to vocab')
+            num_added_tokens = self.lm_tokenizer.add_tokens(f'[VID{i}]')
+            gen_token_idx = self.lm_tokenizer(f'[VID{i}]', add_special_tokens=False).input_ids
+            assert len(gen_token_idx) == 1, gen_token_idx
+            self.args['gen_vid_token_idx'].append(gen_token_idx[0])
+
+    def _add_audio_token(self):
+        self.lm_tokenizer.add_tokens({"<Aud>"})
+        self.lm_tokenizer.add_tokens({"</Aud>"})
+        # add [img] tokens to vocab
+        self.args['gen_audio_token_idx']= []
+        for i in range(self.args['num_gen_audio_tokens']):
+            print('adding image tokens to vocab')
+            num_added_tokens = self.lm_tokenizer.add_tokens(f'[AUD{i}]')
+            gen_token_idx = self.lm_tokenizer(f'[AUD{i}]', add_special_tokens=False).input_ids
+            assert len(gen_token_idx) == 1, gen_token_idx
+            self.args['gen_audio_token_idx'].append(gen_token_idx[0])
+            
+    def get_text_encoding(
             self,
             input_ids: Optional[torch.Tensor] = None,
             attention_mask: Optional[torch.Tensor]=None,
@@ -109,65 +148,122 @@ class Chuddy(Blip2Base):
             return_dict=return_dict)
         return text_outputs
         
-    def get_image_features(
+    def get_image_encoding(
             self,
-            pixel_values: Optional[torch.FloatTensor]=None,
-            output_attentions: Optional[bool]=None,
-            output_hidden_states: Optional[bool]=None,
-            return_dict: Optional[bool]=None):
-        output_attentions = output_attentions
-        output_hidden_states = output_hidden_states
-        return_dict = return_dict
-        vision_outputs = self.visual_encoder(
-            pixel_values=pixel_values,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict
+            image_path):
+        inputs = {ModalityType.VISION: data.load_and_transform_vision_data(image_path,self.device)}
+        inputs = {key: inputs[key].to(self.language_model.dtype) for key in inputs}
+        with torch.no_grad():
+            embeddings = self.visual_encoder(inputs)
+            image_embeds = embeddings['vision']
+        inputs_llm = self.language_projection(image_embeds).unsqueeze(1)
+        atts_llm = torch.ones(inputs_llm.size()[:-1],dtype=torch.long).to(self.ddevice)
+        return inputs_llm,atts_llm
+
+    
+    def get_video_encoding(
+            self,
+            video_path):
+        inputs = {ModalityType.VISION: data.load_and_transform_vision_data(video_path,self.device)}
+        inputs = {key: inputs[key].to(self.language_model.dtype) for key in inputs}
+        with torch.no_grad():
+            embeddings = self.visual_encoder(inputs)
+            video_embeds = embeddings[ModalityType.VISION]
+        inputs_llm = self.language_projection(video_embeds).unsqueeze(1)
+        atts_llm = torch.ones(inputs_llm.size()[:-1],dtype=torch.long).to(self.ddevice)
+        return inputs_llm,atts_llm
+
+    
+    def get_audio_encoding(
+            self,
+            audio_path):
+        inputs = {ModalityType.AUDIO: data.load_and_transform_vision_data(audio_path,self.device)}
+        inputs = {key: inputs[key].to(self.language_model.dtype) for key in inputs}
+        with torch.no_grad():
+            embeddings = self.visual_encoder(inputs)
+            audio_embeds = embeddings[ModalityType.AUDIO]
+        inputs_llm = self.language_projection(audio_embeds).unsqueeze(1)
+        atts_llm = torch.ones(inputs_llm.size()[:-1],dtype=torch.long).to(self.ddevice)
+        return inputs_llm,atts_llm
+
+
+    ###==============================Decoder-side-module-alignment=====================########
+    # alignment module for LLM-to_image adapted from Next-GPT
+    self.sd_ckpt_path = self.args['image_diffusion']
+    self.gen_text_hidden_fcs = nn.ModuleList([])
+    for layer_idx in self.args['text_emb_to_img_layers']:
+        if layer_idx == -1 or layer_idx == self.language_model.config.num_hidden_layers:
+            in_dim = self.language_model.config.hidden_size
+            self.gen_text_hidden_fcs.append(
+                TextFcLayer(in_dim,768,
+                            num_input_tokens=self.args['num_gen_img_tokens'].
+                            num_output_tokens=self.args['num_clip_tokens'],
+                            mode = self.args['text_fc_to_img_mode'])
             )
-        return vision_outputs
+        elif layer_idx < self.language_model.config.num_hidden_layers:
+            self.gen_text_hidden_fcs.append(
+              TextFcLayer(self.language_model.config.hidden_size,768,
+                            num_input_tokens=self.args['num_gen_img_tokens'].
+                            num_output_tokens=self.args['num_clip_tokens'],
+                            mode = self.args['text_fc_to_img_mode'])
+        )
+        else: 
+            raise ValueError(f'embedding of layer {layer_idx} was requested but model only has {self.language_model.config.num_hidden_layers}')
+
     
+    # alignment module for LLM-to_video adapted from Next-GPT
+    self.sd_ckpt_path = self.args['video_diffusion']
+    self.gen_text_hidden_fcs_video = nn.ModuleList([])
+    for layer_idx in self.args['text_emb_to_video_layers']:
+        if layer_idx == -1 or layer_idx == self.language_model.config.num_hidden_layers:
+            in_dim = self.language_model.config.hidden_size
+            self.gen_text_hidden_fcs_video.append(
+                TextFcLayer(in_dim,1024,
+                            num_input_tokens=self.args['num_gen_video_tokens'].
+                            num_output_tokens=self.args['num_clip_tokens'],
+                            mode = self.args['text_fc_to_video_mode'])
+            )
+        elif layer_idx < self.language_model.config.num_hidden_layers:
+            self.gen_text_hidden_fcs_video.append(
+              TextFcLayer(self.language_model.config.hidden_size,1024,
+                            num_input_tokens=self.args['num_gen_video_tokens'].
+                            num_output_tokens=self.args['num_clip_tokens'],
+                            mode = self.args['text_fc_to_video_mode'])
+        )
+        else: 
+            raise ValueError(f'embedding of layer {layer_idx} was requested but model only has {self.language_model.config.num_hidden_layers}')
+
+     
+    # alignment module for LLM-to_Audio adapted from Next-GPT
+    self.sd_ckpt_path = self.args['audio_diffusion']
+    self.gen_text_hidden_fcs_audio = nn.ModuleList([])
+    for layer_idx in self.args['text_emb_to_audio_layers']:
+        if layer_idx == -1 or layer_idx == self.language_model.config.num_hidden_layers:
+            in_dim = self.language_model.config.hidden_size
+            self.gen_text_hidden_fcs_audio.append(
+                TextFcLayer(in_dim,512,
+                            num_input_tokens=self.args['num_gen_audio_tokens'].
+                            num_output_tokens=self.args['num_clip_tokens'],
+                            mode = self.args['text_fc_to_audio_mode'])
+            )
+        elif layer_idx < self.language_model.config.num_hidden_layers:
+            self.gen_text_hidden_fcs_audio.append(
+              TextFcLayer(self.language_model.config.hidden_size,512,
+                            num_input_tokens=self.args['num_gen_audio_tokens'].
+                            num_output_tokens=self.args['num_clip_tokens'],
+                            mode = self.args['text_fc_to_audio_mode'])
+        )
+        else: 
+            raise ValueError(f'embedding of layer {layer_idx} was requested but model only has {self.language_model.config.num_hidden_layers}')
     
-    def qformer_features(
-            self,
-            input_ids: Optional[torch.FloatTensor]=None,
-            pixel_values: Optional[torch.FloatTensor]=None,
-            attention_mask: Optional[torch.Tensor]=None,
-            output_attentions: Optional[bool]=None,
-            output_hidden_states: Optional[bool]=None,
-            return_dict: Optional[bool]=None):
-        output_attentions = output_attentions
-        output_hidden_states = output_hidden_states
-        return_dict = return_dict
-        if pixel_values is not None:
-            vision_outputs = self.get_image_features(   
-            self,
-            pixel_values=pixel_values,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict)
-            image_embeds = vision_outputs[0]
-            image_attention_mask = torch.ones(image_embeds.size()[:-1],
-                                              dtype=torch.long,
-                                              device=image.device)
-            query_tokens = self.query_tokens.expand(image_embeds.shape[0],-1,-1)
-            query_outputs = self.qformer(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                query_embeds=query_tokens,
-                encoder_hidden_states=image_embeds,
-                encoder_attention_mask=image_attention_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_attentions,
-                return_dict=return_dict)
-        query_outputs = self.qformer(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_attentions=output_attentions,
-                output_hidden_states=output_attentions,
-                return_dict=return_dict)
-        return query_outputs
-        
-    
+
+    if self.args['freeze_output_proj']:
+        for name,params in self.gen_text_hidden_fcs.named_parameters():
+            params.requires_grad = False
+        for name,params in self.gen_text_hidden_fcs_video.named_parameters():
+            params.requires_grad = False
+        for name,params in self.gen_text_hidden_fcs_audio.named_parameters():
+            params.requires_grad = False
     #####=================Model's Forward Method ==============##########
     
     def forward(self,
@@ -193,70 +289,7 @@ class Chuddy(Blip2Base):
                                                
         #image_atts = torch.ones(image_embed.size()[:-1],dtype=torch.long).to(image.device)
         image_embeds = F.normalize(self.vision_proj(image_features.last_hidden_state),dim=-1)
-       
-        #######=============Image-Text-Contrastive==============#############
-        
-        # sim_i2t = (image_embeds @ text_embeds.t()) / self.temp
-        # sim_t2i = (text_embeds @ image_embeds.t()) / self.temp
-        # image_sim = image_embeds @ image_embeds.T
-        # text_sim = text_embeds @ text_embeds.T
-        # targets = F.softmax(
-        #     (image_sim + text_sim) / 2 * self.temp,dim=-1)
-        # text_loss = nn.CrossEntropyLoss()(sim_t2i,targets).mean()
-        # image_loss = nn.CrossEntropyLoss()(sim_i2t,targets.T).mean()
-        # loss_itc = (image_loss + text_loss) /2.0
-        
-        #######================Image-Text-Matching==============#######
-        #Adapted from salesforce blip_pretrain image-text matching
-        # bs = image.size(0)
-        # output_pos = qformer_features(
-        #     input_ids=text_input.input_ids,
-        #     pixel_values=image,
-        #     attention_mask=text_input.attention_mask,
-        #     output_attentions=output_attentions,
-        #     output_hidden_states=output_hidden_states,
-        #     return_dict=return_dict,
-        #     )
-        # with torch.no_grad():
-        #     weights_t2i = F.softmax(sim_t2i[:,:bs],dim=1)+1e-4
-        #     weights_t2i.fill_diagonal_(0)
-        #     weights_i2t = F.softmax(sim_i2t[:,:bs],dim=1)+1e-4
-        #     weights_i2t.fill_diagonal_(0)
-        
-        #select a negative image for each text
-        # image_embeds_neg = []
-        # for b in range(bs):
-        #     neg_idx = torch.multinomial(weights_t2i[b],1).item()
-        #     image_embed_neg.append(image_embeds[neg_idx])
-        # image_embeds_neg = torch.stack(image_embeds_neg,dim=0)
-        # #select a negative text for each image
-        # text_ids_neg = []
-        # text_atts_neg = []
-        # for b in range(bs):
-        #     neg_idx = torch.multinomial(weights_i2t[b],1).item()
-        #     text_ids_neg.append(text_input.input_ids[neg_idx])
-        #     text_atts_neg.append(text_input.input_ids.attention_mask[neg_idx])
-        # text_ids_neg = torch.stack(text_ids_neg,dim=0)
-        # text_atts_neg = torch.stack(text_atts_neg,dim=0)
-        # text_ids_all = torch.cat([text_input.input_ids,text_ids_neg],dim=0)
-        # text_atts_all = torch.cat([text_input.attention_mask,text_atts_neg],dim=0)
-        # image_embeds_all = torch.cat([image_embeds_neg,image_embeds],dim=0)
-        # image_atts_all = torch.cat([image_atts,image_atts],dim=0)
-        # output_neg = self.qformer_features(
-        #     input_ids=text_ids_all,
-        #     attention_mask = text_atts_all,
-        #     encoder_hidden_states=image_embeds_all,
-        #     encoder_attention_mask=image_atts_all,
-        #     return_dict =True
-        #     )
-        # vl_embeddings = torch.cat([output_pos.last_hidden_state[:,0,:],
-        #                            output_neg.last_hidden_state[:,0,:]],dim=0)
-        # vl_output = self.itm_head(vl_embeddings)
-        # itm_labels = torch.cat([torch.ones(bs,dtype=torch.long),
-        #                         torch.zeros(2*bs,dtype=torch.long)],dim=0).to(image.device)
-        # loss_itm = F.cross_entropy(vl_output,itm_labels)
-        
-        
+                    
         #######===========Language Modelling==============#######
         self.prompt = prompt
         self.prompt_tokens = self.lm_tokenizer(self.prompt)
