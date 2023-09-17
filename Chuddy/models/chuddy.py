@@ -6,7 +6,6 @@ Created on Sun Aug 27 17:18:40 2023
 """
 import torch
 import transformers
-from transformers import BertTokenizer
 from typing import Union,Tuple,Optional,Any
 from torch import nn
 import torch.nn.functional as F
@@ -14,13 +13,13 @@ from Chuddy.models.imagebind import *
 from Chuddy.models.diffusion_pipelines.sd_pipeline import StableDiffusionPipeline
 from Chuddy.models.diffusion_pipelines.ad_pipeline import AudioLDM2Pipeline
 from Chuddy.models.diffusion_pipelines.vd_pipeline import TextToVideoSDPipeline
-from Chuddy.models.qformer import BertConfig, BertModel, BertLMHeadModel
+# from Chuddy.models.qformer import BertConfig, BertModel, BertLMHeadModel
 from Chuddy.configuration.configuration import  ModelConfig     ## not yet fully implemented
 from Chuddy.models.visual_model import BeitModel,BeitConfig
 from transformers import LlamaForCausalLM,LlamaTokenizer,LlamaConfig
 import logging
-from Chuddy.models.modelling_blip2 import Blip2Base,disabled_train
-from Chuddy.utils.registry import registry
+# from Chuddy.models.modelling_blip2 import Blip2Base,disabled_train
+# from Chuddy.utils.registry import registry
 from peft import (
 LoraConfig,
 get-peft_model,
