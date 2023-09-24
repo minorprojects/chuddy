@@ -10,6 +10,7 @@ from typing import Union,Tuple,Optional,Any
 from torch import nn
 import torch.nn.functional as F
 from Chuddy.models.imagebind import *
+from layers import *
 from Chuddy.models.diffusion_pipelines.sd_pipeline import StableDiffusionPipeline
 from Chuddy.models.diffusion_pipelines.ad_pipeline import AudioLDM2Pipeline
 from Chuddy.models.diffusion_pipelines.vd_pipeline import TextToVideoSDPipeline
@@ -20,6 +21,7 @@ from transformers import LlamaForCausalLM,LlamaTokenizer,LlamaConfig
 import logging
 # from Chuddy.models.modelling_blip2 import Blip2Base,disabled_train
 from Chuddy.utils.util import *
+from Chuddy.utils.header import *
 from peft import (
 LoraConfig,
 get-peft_model,
