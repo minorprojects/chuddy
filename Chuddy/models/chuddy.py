@@ -19,7 +19,7 @@ from Chuddy.models.visual_model import BeitModel,BeitConfig
 from transformers import LlamaForCausalLM,LlamaTokenizer,LlamaConfig
 import logging
 # from Chuddy.models.modelling_blip2 import Blip2Base,disabled_train
-# from Chuddy.utils.registry import registry
+from Chuddy.utils.util import *
 from peft import (
 LoraConfig,
 get-peft_model,
