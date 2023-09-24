@@ -632,6 +632,417 @@ class Chuddy(nn.Module):
             features.append(_temp_embedding)
         feature_embeds = torch.cat(features).sum(dim=0).unsqueeze(0)
         return torch.cat([p_before_embeds,feature_embeds,p_after_embeds],dim=1)
+        
+     def prepare_generation_embedding(self, inputs):
+        prompt = inputs['prompt']
+        text = prompt + '\n### Assistant:'
+        print("text prompt: ", text)
+        batch_size = 1
+        input_embeds = []
+        split_text = re.split(r' <|> ', text)
+        for st in split_text:
+            if st.startswith('Image>'):
+                input_embeds.append(self._prepare_image_embed(st, batch_size))
+            elif st.startswith('Audio>'):
+                input_embeds.append(self._prepare_audio_embed(st, batch_size))
+            elif st.startswith('Video>'):
+                input_embeds.append(self._prepare_video_embed(st, batch_size))
+            else:
+                text_tokens = self.lm_tokenizer(st, add_special_tokens=False, return_tensors='pt').to(self.device)
+                bos = torch.ones([batch_size, 1],
+                                 dtype=text_tokens.input_ids.dtype,
+                                 device=text_tokens.input_ids.device) * self.lm_tokenizer.bos_token_id  # bsz x 1
+                if self.args['freeze_lm']:
+                    text_embeds = self.language_model.model.embed_tokens(text_tokens.input_ids).expand(batch_size, -1, -1)
+                    bos_embeds = self.language_model.model.embed_tokens(bos)  # bsz x 1 x embed_dim
+                else:
+                    text_embeds = self.language_model.model.model.embed_tokens(text_tokens.input_ids).expand(batch_size, -1, -1)
+                    bos_embeds = self.language_model.model.model.embed_tokens(bos)  # bsz x 1 x embed_dim
+                input_embeds.append(bos_embeds)
+                input_embeds.append(text_embeds)
+        inputs_embeds = torch.cat(input_embeds, dim=1)  # bsz x (1+s2) x embed_dim
+        return inputs_embeds
+
+    def generate_tokens_embeddings(self, inputs, input_embeds, temperature: float = 0.0, top_p: float = 1.0):
+        """
+        This function is used to generate the tokens and output embeddings that employed to generate images/videos/audios
+        inputs: dict
+        input_embeds: tensor
+        return:
+            out: the output tokens index
+            output_embeddings: output embeddings for synthesizing images
+            output_logits: the logits of output tokens
+            video_output_embedding: output embeddings for synthesizing video
+        """
+        with torch.no_grad():  # no tracking history
+            # init output with image tokens
+            out = None
+            output_embeddings = []
+            video_output_embedding = []
+            audio_output_embedding = []
+            output_logits = []
+
+            for i in range(inputs['max_tgt_len']):
+                output = self.language_model(inputs_embeds=input_embeds, use_cache=False,
+                                          # top_p=top_p,
+                                          # temperature=temperature,
+                                          # do_sample=True,
+                                          output_hidden_states=True)
+
+                if 'image' in self.args['modality']:
+                    for idx in self.args['text_emb_to_img_layers']:
+                        output_embeddings.append(output.hidden_states[idx])
+                if 'video' in self.args['modality']:
+                    for idx in self.args['text_emb_to_video_layers']:
+                        video_output_embedding.append(output.hidden_states[idx])
+                if 'audio' in self.args['modality']:
+                    for idx in self.args['text_emb_to_audio_layers']:
+                        audio_output_embedding.append(output.hidden_states[idx])
+
+                stop_count = 0
+                stop_words_ids = [torch.tensor(x).to(self.device) for x in
+                                  inputs['stops_id']]  # '###' can be encoded in two different ways.
+                for stop in stop_words_ids:
+                    if not (out is None) and torch.all((stop == out[0][-len(stop):])).item():
+                        stop_count += 1
+                if stop_count >= inputs['ENCOUNTERS']:
+                    break
+
+                logits = output.logits[:, -1, :]  # (N, vocab_size)
+                output_logits.append(logits)
+
+                # Prevent the model from generating the [IMG1..n] tokens.
+                logits[:, self.args['gen_img_token_idx'][1:]] = inputs['filter_value']
+                if self.args['gen_img_token_idx'] and self.args['gen_img_token_idx'][0] != -1:
+                    if i < inputs['min_word_tokens']:
+                        # Eliminate probability of generating [IMG] if this is earlier than min_word_tokens.
+                        logits[:, self.args['gen_img_token_idx']] = inputs['filter_value']
+
+                # Prevent the model from generating the [VID1..n] tokens.
+                logits[:, self.args['gen_video_token_idx'][1:]] = inputs['filter_value']
+                if self.args['gen_video_token_idx'] and self.args['gen_video_token_idx'][0] != -1:
+                    if i < inputs['min_word_tokens']:
+                        # Eliminate probability of generating [IMG] if this is earlier than min_word_tokens.
+                        logits[:, self.args['gen_video_token_idx']] = inputs['filter_value']
+
+                # Prevent the model from generating the [AUD1..n] tokens.
+                logits[:, self.args['gen_audio_token_idx'][1:]] = inputs['filter_value']
+                if self.args['gen_audio_token_idx'] and self.args['gen_audio_token_idx'][0] != -1:
+                    if i < inputs['min_word_tokens']:
+                        # Eliminate probability of generating [IMG] if this is earlier than min_word_tokens.
+                        logits[:, self.args['gen_audio_token_idx']] = inputs['filter_value']
+
+                if inputs['temperature'] == 0.0:
+                    if inputs['top_p'] != 1.0:
+                        raise ValueError('top_p cannot be set if temperature is 0 (greedy decoding).')
+                    next_token = torch.argmax(logits, keepdim=True, dim=-1)  # (N, 1)
+                else:
+                    logits = logits / inputs['temperature']
+
+                    # Apply top-p filtering.
+                    if inputs['top_p'] < 1.0:
+                        top_p = inputs['top_p']
+                        assert inputs['top_p'] > 0, f'top_p should be above 0, got {top_p} instead.'
+                        sorted_logits, sorted_indices = torch.sort(logits, descending=True)  # (N, D) and (N, D)
+                        cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)  # (N, D)
+
+                        # Remove tokens with cumulative probability above the threshold
+                        sorted_indices_to_remove = cumulative_probs > inputs['top_p']
+                        # Shift the indices to the right to keep also the first token above the threshold
+                        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                        sorted_indices_to_remove[..., 0] = 0
+                        # print('sorted_indices shape: ', sorted_indices.shape)
+                        for j in range(sorted_indices.shape[0]):
+                            indices_to_remove = sorted_indices[j, sorted_indices_to_remove[j, :]]
+                            logits[j, indices_to_remove] = inputs['filter_value']
+                    next_token = torch.argmax(logits, keepdim=True, dim=-1)  # (N, 1)
+                    # token_weights = torch.nn.functional.sigmoid(logits.exp())  # (N, vocab_size)
+                    # print(logits.sum())
+                    # print(token_weights[-20:])
+                    # next_token = torch.multinomial(logits, 1)  # (N, 1)
+                    # print('next token 2: ', next_token)
+
+                # Force generation of the remaining [IMG] tokens if [IMG0] is generated.
+                if next_token.shape[0] == 1 and next_token.item() == self.args['gen_img_token_idx'][0]:
+                    next_token = torch.tensor(self.args['gen_img_token_idx'])[None, :].long().to(
+                        input_embeds.device)  # (1, num_tokens)
+                # Force generation of the remaining [VID] tokens if [VID0] is generated.
+                elif next_token.shape[0] == 1 and next_token.item() == self.args['gen_video_token_idx'][0]:
+                    next_token = torch.tensor(self.args['gen_video_token_idx'])[None, :].long().to(
+                        input_embeds.device)  # (1, num_tokens)
+                # Force generation of the remaining [AUD] tokens if [AUD0] is generated.
+                elif next_token.shape[0] == 1 and next_token.item() == self.args['gen_audio_token_idx'][0]:
+                    next_token = torch.tensor(self.args['gen_audio_token_idx'])[None, :].long().to(
+                        input_embeds.device)  # (1, num_tokens)
+                else:
+                    next_token = next_token.long().to(input_embeds.device)
+
+                if out is not None:
+                    out = torch.cat([out, next_token], dim=-1)
+                else:
+                    out = next_token
+
+                next_embedding = self.input_embeddings(next_token)
+                input_embeds = torch.cat([input_embeds, next_embedding], dim=1)
+
+        return out, output_embeddings, output_logits, video_output_embedding, audio_output_embedding
+
+    def generate_images(self, generated_ids, embeddings, all_gen_idx, generation_model=None,
+                        guidance_scale=7.5, num_inference_steps=40):
+        """
+        To generate the images based on the embeddings
+        generated_ids: the  index of the generated tokens
+        embedding: the embeddings for synthesizing videos
+        all_gen_idx: the index of [VID0] in the generated_ids
+        """
+        last_ret_idx = 0
+        return_outputs = []
+        generation_model = StableDiffusionPipeline.from_pretrained(self.sd_ckpt_path, torch_dtype=torch.float16).to(
+            "cuda")
+        for gen_idx in all_gen_idx:
+            assert generated_ids[0,
+                   gen_idx:gen_idx + self.args['num_gen_img_tokens']].cpu().detach().numpy().tolist() == self.args[
+                       'gen_img_token_idx'], (
+                generated_ids[0, gen_idx:gen_idx + self.args['num_gen_img_tokens']], self.args['gen_img_token_idx'])
+            raw_emb = embeddings[:, gen_idx:gen_idx + self.args['num_gen_img_tokens'], :]  # (1, 8, 4096)
+
+            # Produce generation embedding.
+            gen_prefix = ' '.join([f'[IMG{i}]' for i in range(self.args['num_gen_img_tokens'])])
+            gen_prefx_ids = self.lm_tokenizer(gen_prefix, add_special_tokens=False,
+                                                 return_tensors="pt").input_ids.to(self.device)
+            gen_prefix_embs = self.input_embeddings(gen_prefx_ids)  # (1, T_I_V_A.txt, D)
+            gen_emb = self.gen_text_hidden_fcs[-1](raw_emb, gen_prefix_embs)  # (1, 77, 768)
+
+            if gen_emb.shape[1] != 77:
+                bs = gen_emb.shape[0]
+                clip_emb = 768
+                gen_emb = gen_emb.reshape(bs, -1, clip_emb)  # (bs, T_I_V_A.txt, 768)
+                seq_len = gen_emb.shape[1]
+                gen_emb = torch.cat([gen_emb, torch.zeros((bs, 77 - seq_len, clip_emb), device=gen_emb.device,
+                                                          dtype=gen_emb.dtype)], dim=1)
+
+            image_outputs = generation_model(prompt_embeds=gen_emb,
+                                             guidance_scale=guidance_scale,
+                                             num_inference_steps=num_inference_steps).images
+
+            caption = \
+                self.lm_tokenizer.batch_decode(generated_ids[:, last_ret_idx:gen_idx], skip_special_tokens=True)[
+                    0]
+            last_ret_idx = gen_idx + 1
+            return_outputs.append(caption + f' {gen_prefix}')
+            # return_outputs.append(truncate_caption(caption) + f' {gen_prefix}')
+            return_outputs.append(image_outputs)
+        return return_outputs
+
+    def generate_videos(self, generated_ids, embeddings, all_gen_idx, generation_model=None,
+                        guidance_scale=7.5, num_inference_steps=40, height=320, width=576, num_frames=16):
+        """
+        To generate videos based on the embeddings
+        generated_ids: the  index of the generated tokens
+        embedding: the embeddings for synthesizing videos
+        all_gen_idx: the index of [VID0] in the generated_ids
+        """
+        return_outputs = []
+        last_ret_idx = 0
+        generation_model = TextToVideoSDPipeline.from_pretrained(self.vd_ckpt_path, torch_dtype=torch.float16).to(
+            "cuda")
+        for gen_idx in all_gen_idx:
+            assert generated_ids[0,
+                   gen_idx:gen_idx + self.args['num_gen_video_tokens']].cpu().detach().numpy().tolist() == \
+                   self.args[
+                       'gen_video_token_idx'], (
+                generated_ids[0, gen_idx:gen_idx + self.args['num_gen_video_tokens']],
+                self.args['gen_video_token_idx'])
+            raw_emb = embeddings[:, gen_idx:gen_idx + self.args['num_gen_video_tokens'], :]  # (1, 8, 4096)
+            # print(f'gen_idx: {gen_idx}')
+            # print('4', raw_emb.size())
+            # assert len(self.args['text_emb_to_video_layers']) == 1
+
+            # Produce generation embedding.
+            gen_prefix = ' '.join([f'[VID{i}]' for i in range(self.args['num_gen_video_tokens'])])
+            gen_prefx_ids = self.lm_tokenizer(gen_prefix, add_special_tokens=False,
+                                                 return_tensors="pt").input_ids.to(self.device)
+            gen_prefix_embs = self.input_embeddings(gen_prefx_ids)  # (1, T_I_V_A.txt, D)
+            gen_emb = self.gen_text_hidden_fcs_video[-1](raw_emb, gen_prefix_embs)  # (1, 77, 768)
+
+            if gen_emb.shape[1] != 77:
+                print(f"Padding {gen_emb.shape} with zeros")
+                bs = gen_emb.shape[0]
+                clip_emb = 768
+                gen_emb = gen_emb.reshape(bs, -1, clip_emb)  # (bs, T_I_V_A.txt, 768)
+                seq_len = gen_emb.shape[1]
+                gen_emb = torch.cat([gen_emb, torch.zeros((bs, 77 - seq_len, clip_emb), device=gen_emb.device,
+                                                          dtype=gen_emb.dtype)], dim=1)
+                print('Padded to', gen_emb.shape)
+
+            video_outputs = generation_model(prompt_embeds=gen_emb,
+                                             guidance_scale=guidance_scale,
+                                             num_inference_steps=num_inference_steps, height=height,
+                                             width=width, num_frames=num_frames).frames
+            caption = \
+                self.lm_tokenizer.batch_decode(generated_ids[:, last_ret_idx:gen_idx], skip_special_tokens=True)[
+                    0]
+            last_ret_idx = gen_idx + 1
+            return_outputs.append(caption + f' {gen_prefix}')
+            # return_outputs.append(truncate_caption(caption) + f' {gen_prefix}')
+            return_outputs.append(video_outputs)
+        return return_outputs
+
+    def generate_audios(self, generated_ids, embeddings, all_gen_idx, generation_model=None,
+                        guidance_scale=7.5, num_inference_steps=40, audio_length_in_s=5.0):
+        """
+        To generate videos based on the embeddings
+        generated_ids: the  index of the generated tokens
+        embedding: the embeddings for synthesizing videos
+        all_gen_idx: the index of [VID0] in the generated_ids
+        """
+        return_outputs = []
+        last_ret_idx = 0
+        generation_model = AudioLDMPipeline.from_pretrained(self.ad_ckpt_path, torch_dtype=torch.float16).to("cuda")
+        for gen_idx in all_gen_idx:
+            assert generated_ids[0,
+                   gen_idx:gen_idx + self.args['num_gen_audio_tokens']].cpu().detach().numpy().tolist() == \
+                   self.args[
+                       'gen_audio_token_idx'], (
+                generated_ids[0, gen_idx:gen_idx + self.args['num_gen_audio_tokens']],
+                self.args['gen_audio_token_idx'])
+            raw_emb = embeddings[:, gen_idx:gen_idx + self.args['num_gen_audio_tokens'], :]  # (1, 8, 4096)
+            # print(f'gen_idx: {gen_idx}')
+            # print('raw_emb 4', raw_emb.size())
+            # assert len(self.args['text_emb_to_video_layers']) == 1
+
+            # Produce generation embedding.
+            gen_prefix = ' '.join([f'[AUD{i}]' for i in range(self.args['num_gen_audio_tokens'])])
+            gen_prefx_ids = self.lm_tokenizer(gen_prefix, add_special_tokens=False,
+                                                 return_tensors="pt").input_ids.to(self.device)
+            gen_prefix_embs = self.input_embeddings(gen_prefx_ids)  # (1, T_I_V_A.txt, D)
+            gen_emb = self.gen_text_hidden_fcs_audio[-1](raw_emb, gen_prefix_embs)  # (1, 77, 768)
+            # print('gen_emb size:', gen_emb.size())
+            bs = gen_emb.shape[0]
+            hid_emb_size = gen_emb.shape[2]
+            gen_emb = gen_emb.view(bs, hid_emb_size)
+
+            audio_outputs = generation_model(prompt_embeds=gen_emb,
+                                             guidance_scale=guidance_scale,
+                                             num_inference_steps=num_inference_steps,
+                                             audio_length_in_s=audio_length_in_s).audios[0]
+            caption = \
+                self.lm_tokenizer.batch_decode(generated_ids[:, last_ret_idx:gen_idx], skip_special_tokens=True)[
+                    0]
+            last_ret_idx = gen_idx + 1
+            return_outputs.append(caption + f' {gen_prefix}')
+            # return_outputs.append(truncate_caption(caption) + f' {gen_prefix}')
+            return_outputs.append(audio_outputs)
+        return return_outputs
+
+    def generate(self, inputs):
+        """
+            inputs = {
+                'image_paths': optional,
+                'audio_paths': optional
+                'video_paths': optional
+                'thermal_paths': optional
+                'mode': generation mode,
+                'prompt': human input prompt,
+                'max_tgt_len': generation length,
+                'top_p': top_p,
+                'temperature': temperature, Used to modulate logit distribution.
+                'modality_embeds': None or torch.tensor,
+                'modality_cache': save the image cache,
+
+                'filter_value': Value to assign to tokens that should never be generated,
+                'min_word_tokens': Minimum number of words to generate before allowing a [IMG] output.
+                'gen_scale_factor': float = 1.0,
+                'stops_id': the default value is [[835], [2277, 29937]] the stop token is '###', which has two types of tokenization ways, [835] and [2277, 29937]
+                'ENCOUNTERS': the times that the generated sentence will be ended.
+
+                'load_sd': whether use SD for image generation
+                'max_num_imgs': Maximum number of images to return in one generation pass.
+                'guidance_scale_for_img': the guidance ratio of conditioner, if it is None, the default value will be applied in SD
+                'num_inference_steps_for_img': the number of inference step for image generation in the stable diffusion model
+
+                'load_vd': whether use VD for video generation
+                'max_num_vids': Maximum number of videos to return in one generation pass.
+                'guidance_scale_for_vid': the guidance ratio of conditioner, if it is None, the default value will be applied in VD
+                'num_inference_steps_for_vid': the number of inference step for video generation in the stable diffusion model
+                'height': (`int`, *optional*, defaults to self.unet.config.sample_size * self.vae_scale_factor):
+                        The height in pixels of the generated video.
+                'width': (`int`, *optional*, defaults to self.unet.config.sample_size * self.vae_scale_factor):
+                        The width in pixels of the generated video.
+                'num_frames': (`int`, *optional*, defaults to 16):
+                        The number of video frames that are generated. Defaults to 16 frames which at 8 frames per seconds
+                        amounts to 2 seconds of video.
+
+                'load_ad': whether use AD for audio generation
+                'max_num_auds': Maximum number of audios to return in one generation pass.
+                'guidance_scale_for_aud': the guidance ratio of conditioner, if it is None, the default value will be applied in AD
+                'num_inference_steps_for_aud': the number of inference step for audio generation in the stable diffusion model
+                'audio_length_in_s': the seconds for generated audio length
+            }
+        """
+        # init output with image tokens
+
+        input_embeds = self.prepare_generation_embedding(inputs)
+        generated_ids, generated_embeddings, _, generated_video_embeddings, generated_audio_embeddings = self.generate_tokens_embeddings(
+            inputs, input_embeds)
+
+        return_outputs = []
+
+        # Find up to max_num_rets [IMG] tokens, and their corresponding scores.
+        all_gen_img_idx = [i for i, x in enumerate(generated_ids[0, :] == self.args['gen_img_token_idx'][0]) if x][
+                          :inputs['max_num_imgs']]
+        print('all_gen_img_idx: ', all_gen_img_idx)
+
+        # Find up to max_num_rest [VID] tokens, and their corresponding scores.
+        all_gen_vid_idx = [i for i, x in enumerate(generated_ids[0, :] == self.args['gen_video_token_idx'][0]) if x][
+                          :inputs['max_num_vids']]
+        print('all_gen_vid_idx: ', all_gen_vid_idx)
+
+        # Find up to max_num_rest [AUD] tokens, and their corresponding scores.
+        all_gen_aud_idx = [i for i, x in enumerate(generated_ids[0, :] == self.args['gen_audio_token_idx'][0]) if x][
+                          :inputs['max_num_auds']]
+        print('all_gen_aud_idx: ', all_gen_aud_idx)
+
+        if len(all_gen_img_idx) == 0 and len(all_gen_vid_idx) == 0 and len(all_gen_aud_idx) == 0:
+            # No [IMG], [VID], [AUD] tokens.
+            caption = self.lm_tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            # return_outputs.append(truncate_caption(caption))
+            return_outputs.append(caption)
+        else:
+            if len(all_gen_img_idx) > 0:
+                embeddings = generated_embeddings[-1][:, input_embeds.shape[1]:]
+                # embeddings = embeddings[:, :trunc_idx] if trunc_idx > 0 else embeddings
+                # sd_pipe = StableDiffusionPipeline.from_pretrained(self.args['image_generation_ckpt_path'],
+                #                                                   torch_dtype=torch.float16).to(self.device)
+                img_outputs = self.generate_images(generated_ids, embeddings, all_gen_img_idx, None,
+                                                   guidance_scale=inputs['guidance_scale_for_img'],
+                                                   num_inference_steps=inputs['num_inference_steps_for_img'],
+                                                   )
+                return_outputs.append({'img': img_outputs})
+            if len(all_gen_vid_idx) > 0:
+                video_embeddings = generated_video_embeddings[-1][:, input_embeds.shape[1]:]
+                # video_embeddings = video_embeddings[:, :trunc_idx] if trunc_idx > 0 else video_embeddings
+                # vd_pipe = TextToVideoSDPipeline.from_pretrained(self.args['video_generation_ckpt_path'],
+                #                                                 torch_dtype=torch.float16).to(self.device)
+                vid_outputs = self.generate_videos(generated_ids, video_embeddings, all_gen_vid_idx, None,
+                                                   guidance_scale=inputs['guidance_scale_for_vid'],
+                                                   num_inference_steps=inputs['num_inference_steps_for_vid'],
+                                                   height=inputs['height'], width=inputs['width'],
+                                                   num_frames=inputs['num_frames'])
+                return_outputs.append({'vid': vid_outputs})
+
+            if len(all_gen_aud_idx) > 0:
+                audio_embeddings = generated_audio_embeddings[-1][:, input_embeds.shape[1]:]
+                # audio_embeddings = audio_embeddings[:, :trunc_idx] if trunc_idx > 0 else audio_embeddings
+                # ad_pipe = AudioLDMPipeline.from_pretrained(self.args['audio_generation_ckpt_path'],
+                #                                            torch_dtype=torch.float16).to(self.device)
+                aud_outputs = self.generate_audios(generated_ids, audio_embeddings, all_gen_aud_idx, None,
+                                                   guidance_scale=inputs['guidance_scale_for_aud'],
+                                                   num_inference_steps=inputs['num_inference_steps_for_aud'],
+                                                   audio_length_in_s=inputs['audio_length_in_s'])
+                return_outputs.append({'aud': aud_outputs})
+
+        return return_outputs
     
     
                
