@@ -263,119 +263,376 @@ class Chuddy(nn.Module):
             params.requires_grad = False
         for name,params in self.gen_text_hidden_fcs_audio.named_parameters():
             params.requires_grad = False
-    #####=================Model's Forward Method ==============##########
+            
     
-    def forward(self,
-                image,
-                caption,
-                output_attentions: Optional[bool]=None,
-                output_hidden_states: Optional[bool]=None,
-                return_dict: Optional[bool]=None):
+
+    def prompt_wraps(self,input_ids,img_embeds,target_ids,attention_mask):
+        input_ids = input_ids.to(device)
+        target_ids = target_ids.to(device)
+        attention_mask = attention_mask.to(device)
         
-        text_input = self.tokenizer(caption,
-                                    padding='max_length',
-                                    truncation=True,
-                                    max_length=35,
-                                    return_tensors='pt').to(image.device)
-        text_features = self.qformer_features(input_ids=text_input.input_ids,
-                                           output_attentions=output_attentions, 
-                                           output_hidden_states=output_hidden_states, 
-                                           return_dict=return_dict)
-        text_embeds = F.normalize(self.text_proj(text_features.last_hidden_state[:,0,:]),dim=-1)
-     
-        image_features = self.qformer_features(pixel_values=image,
-                                               return_dict=return_dict)
-                                               
-        #image_atts = torch.ones(image_embed.size()[:-1],dtype=torch.long).to(image.device)
-        image_embeds = F.normalize(self.vision_proj(image_features.last_hidden_state),dim=-1)
-                    
-        #######===========Language Modelling==============#######
-        self.prompt = prompt
-        self.prompt_tokens = self.lm_tokenizer(self.prompt)
-        self.lm_tokenizer.padding_side='right'
-        self.lm_tokenizer.truncation_side='left'
-        decoder_input_ids = self.lm_tokenizer(caption,
-                                             return_tensors='pt',
-                                             truncation=True,
-                                             max_length=self.max_text_length)
-        decoder_targets = decoder_input_ids.masked_fill(decoder_input_ids,-100)
-        query_output = self.qformer_features(image)[0]
-        language_model_inputs = self.language_projection(query_output)
-        language_model_attention_mask = torch.ones(
-            language_model_inputs.size()[:-1],dtype=torch.long,device=language_model_inputs.device
-            )
+        batch_size = input_ids.shape[0]
+        bos = torch.ones([batch_size,1],dtype=input_ids.dtype,device=input_ids.device) * self.lm_tokenizer.bos_token_id
+        if self.args['freeze_lm']:
+            p_after_embeds = self.language_model.model.embed_tokens(input_ids).expand(batch_size,-1,-1)
+            bos_embeds = self.language_model.model.embed_tokens(bos)
+        else:
+            p_after_embeds = self.language_model.model.model.embed_tokens(input_ids).expand(batch_size,-1,-1)
+            bos_embeds = self.language_model.model.model.embed_tokens(bos)
+        if img_embeds is not None:
+            p_before = "### Human: <Img>"
+            p_before_tokens = self.lm_tokenizer(p_before,return_tensors='pt',add_special_tokens=False).to(self.device)
+            if self.args['freeze_lm']:
+                p_before_embeds = self.language_model.model.embed_tokens(p_before_tokens.input_ids).expand(batch_size,-1,-1)
+            else:
+                p_before_embeds = self.language_model.model.model.embed_tokens(p_before_tokens.input_ids).expand(batch_size,-1,-1)
+            input_embeds = torch.cat([p_after_embeds,p_before_embeds,img_embeds,bos_embeds],dim=1).to(self.device)
+            empty_targets = (
+                torch.ones([batch_size,1 + p_before_embeds.size()[1]+1],dtype=torch.long).to(self.device).fill_(-100)
+                )
+            targets = torch.cat([empty_targets,target_ids],dim=1).to(self.device)
+            assert input_embeds.size()[1] == targets.size()[1]
+            atts_prefix = torch.ones([batch_size,1+p_before_embeds.size()[1]+1],dtype=torch.long).to(self.device)
+            attention_mask = torch.cat([atts_prefix,attention_mask],dim=1).to(self.device)
+            assert attention_mask.size() == targets.size()
+        else:
+            p_before = "### Human"
+            p_before_tokens = self.lm_tokenizer(p_before,return_tensors="pt",add_special_token=False).to(self.device)
+            if self.args['freeze_lm']:
+                p_before_embeds = self.language_model.model.embed_tokens(p_before_tokens.input_ids).expand(batch_size,-1,-1)
+            else:
+                p_before_embeds = self.language_model.model.model.embed_tokens(p_before_tokens.input_ids).expand(batch_size,-1,-1)
+            input_embeds = torch.cat([bos_embeds,p_before_embeds,p_after_embeds],dim=1).to(self.device)
+            empty_targets = (
+                torch.ones([batch_size,1+p_before_embeds.size()[1]],dtype=torch.long).to(self.device).fill_(-100)
+                )
+            targets = torch.cat([empty_targets,target_ids],dim=1).to(self.device)
+            assert input_embeds.size()[1] == targets.size()[1]
+            atts_prefix = torch.ones([batch_size,1+p_before_embeds.size()[1]],dtype=torch.long).to(self.device)
+            attention_mask = torch.cat([atts_prefix,attention_mask],dim=1).to(self.device)
+            assert attention_mask.size() == target.size()
+        return input_embeds,targets,attention_mask
+
+    def _train_with_mode(self,
+                         texts,
+                         img_embeds=None,
+                         modality='text',
+                         num_gen_tokens='8',
+                         text_hidden_fcs=None,
+                         gen_token_idx=None,
+                         text_emb_layers=None,
+                         text_prompt_embeddings=None,
+                         loss_scale=1.0,
+                         stage=2):
+        if stage == 2:
+            input_ids,target_ids,attention_mask = process_batch_stage_2(
+                self.lm_tokenizer,
+                texts,
+                self.max_len,
+                num_gen_tokens,
+                modality
+                )
+        elif stage == 3:
+            input_ids,target_ids,attention_mask = process_batch_stage_3(
+                self.lm_tokenizer,
+                texts,
+                self.max_len,
+                self.args['num_gen_img_tokens'],
+                self.args['num_gen_video_tokens'],
+                self.args['num_gen_audio_tokens']
+                )
+        else:
+            raise NotImplementedError 
+        input_embeds,targets,attention_mask = self.prompt_wrap(img_embeds,
+                                                               input_ids,
+                                                               target_ids,
+                                                               attention_mask)
+        outputs = self.language_model(inputs_embeds=input_embeds,
+                                      attention_mask=attention_mask,
+                                      return_dict=True,
+                                      output_hidden_states=True,
+                                      labels=targets,)
+        loss = output.loss
         
-        input_embeds = self.language_model.get_input_embeddings()(decoder_input_ids)
-        input_embeds = torch.cat([language_model_inputs,inputs_embeds],dim=1)
-        if attention_mask is None:
-            attention_mask = torch.ones_like(input_ids)
-        expected_device = language_model_attention_mask.device
-        attention_mask = torch.cat([language_model_attention_mask,
-                                    decoder_input_ids.attention_mask.to(expected_device)],dim=1)
-        outputs = self.language_model(
-            inputs_embeds=input_embeds,
-            attention_mask=attention_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict)
-        logits = outputs.logits if return_dict else outputs[0]
-        labels = decoder_targets
-        labels = labels.to(logits.device)
-        logits = logits[...,-labels.size(1):,:]
-        shift_logits = logits[...,:-1,:].contiguous()
-        shift_labels = labels[...,1:].contiguous().to(logits.device)
-        loss_fct = F.cross_entropy(reduction='mean')
-        loss_hyp = outputs.loss
-        loss_lm = loss_fct(shift_logits.view(-1,self.text_config.vocab_size),shift_labels.view(-1))
-        return loss_itc,loss_itm,loss_lm,loss_hyp
-    ######==============model's generate function===========########
-    @torch.no_grad()
-    def generate(self,
-                 image: Optional[torch.FloatTensor]=None,
-                 prompt: Optional[torch.LongTensor]=None,
-                 max_length=256,
-                 min_length=1,
-                 temperature=1,
-                 attention_mask: Optional[torch.LongTensor]=None,
-                 **generate_kwargs,
-                ):
-        self.lm_tokenizer.padding_size = 'left'
-        if image is not None:
-            prompt = self.prompt
-            image = image
-            bs = image.size(0)
-            query_tokens = self.query_tokens.expand(bs,-1,-1)
-           # text_qformer = self.tokenizer(
-            image_embeds = get_image_features(image,return_dict=True)
-            image_attention_mask = torch.ones(image_embeds.size()[:-1],dtype=torch.long,device=image_embeds.device)
-            query_tokens = self.query_tokens.expand(image_embeds.shape[0],-1,-1)
-            query_outputs = self.qformer_features(query_embeds=query_tokens,
-                                                  encoder_hidden_states=image_embeds,
-                                                  encoder_attention_mask=image_attention_mask,
-                                                  return_dict=True)
-            query_output = query_outputs.last_hidden_state
-            language_model_inputs = self.language_projection(query_output)
-            language_attention_mask = torch.ones(language_model_input.size()[:-1],dtype=torch.long,device=language_model_inputs.device)
-            if prompt is None:
-                prompt = (torch.LongTensor([[self.config.text_config.bos_token_id]]).repeat(bs,1).to(image_embeds.device))
-            if attention_mask is None:
-                attention_mask = torch.ones_like(prompt)
-            attention_mask = torch.cat([language_attention_mask,attention_mask.to(language_attention_mask.device)],dim=1)
-            input_embeds = self.get_text_features(prompt)
-            #concatenate query_embeddinf with prompt embedding
-            input_embeds = torch.cat([language_model_inputs,input_embeds.to(language_model_inputs.device)],dim=1)
-            outputs = self.langauge_model.generate(
-                input_embeds=input_embeds,
-                attention_mask=attention_mask,
-                **generate_kwargs)
-        input_embeds = self.get_text_features(prompt)
-        outputs = self.langauge_model.generate(
-                input_embeds=input_embeds,
-                attention_mask=attention_mask,
-                **generate_kwargs)
-        return outputs
+        #calculate the token accuracy
+        chosen_tokens = torch.max(outputs.logits,dim=-1)[:,1:-1]
+        labels = targets[:,2:]
+        gen_acc = (chosen_tokens.reshape(-1) == labels.reshape(-1)).to(torch.long)
+        valid_mask = (labels != -100).reshape(-1)
+        valid_tokens = gen_acc & valid_mask
+        gen_acc = valid_tokens.sum().item() / (valid_mask.sum().item()+1.0)
         
+        if modality == 'text':
+            return loss,gen_acc,torch.zeros_like(loss)
+        else:
+            hidden_state = []
+            #i don't know why this code works, but i kow it does
+            start_pos = (targets == gen_token_idx[0]).nonzero(as_tuple=False)[:,1].tolist()
+            end_pos = (targets == gen_token_idx[-1]).nonzero(as_tuple=False)[:,1].tolist()
+            assert 0 < len(start_pos) == len(end_pos) == input_ids.size(0) and len(end_pos) > 0,(start_pos,end_pos)
+            for idx, fc_layer in zip(text_emb_layers,text_hidden_fcs):
+                hidden_embedding = []
+                input_embedding = []
+                for b,(s,e) in enumerate(zip(start_pos,end_pos)):
+                    assert e-s+1 == num_gen_tokens, (s,e)
+                    hidden_embedding.append(outputs.hidden_states[idx][b,s:e+1,:])
+                    input_embedding.append(self.input_embeddings(targets[b,s:e+1]))
+                hidden_embedding = torch.stack(hidden_embedding,dim=0)
+                input_embedding = torch.stack(input_embedding,dim=0)
+                hidden_states.append(fc_layer(hidden_embedding,input_embedding))
+            embeddings = torch.stack(hidden_states,dim=-1).sum(dim=-1)
+            input_text = [conversation for conversation in texts]
+            if modality == 'image':
+                mse_loss = l2_loss(embeddings,torch.stack(text_prompt_embeddings,dim=0).to(self.device))
+            elif modality == 'video':
+                mse_loss = l2_loss(embeddings,torch.stack(text_prompt_embeddings,dim=0))
+            else:
+                text_prompt_embeddings = torch.stack(text_prompt_embeddings,dim=0).to(self.device)
+                assert len(text_prompt_embeddings.shape) == 2, text_prompt_embeddings.shape
+                text_prompt_embeddings = text_prompt_embeddings.view(text_prompt_embeddings.size(0),1,
+                                                                     text_prompt_embeddings.size(1))
+                mse_loss = l2_loss(embeddings,text_prompt_embeddings)
+            mse_loss = mse_loss.mean()
+            loss += loss_scale * mse_loss
+            return loss,gen_acc,mse_loss
+    
+    def _enc_align_training_stage_1(self,inputs):
+        modality = get_modality(inputs['mm_paths'])
+        if modality == 'image':
+            image_paths = inputs['mm_paths']
+            mm_embeds, _ = self.encode_image(image_paths)
+        elif modality == 'video':
+            video_paths = inputs['mm_paths']
+            mm_embeds,_ = self.encode_video(video_paths)
+        elif modality == 'audio':
+            audio_paths = inputs['mm_paths']
+            mm_embeds ,_ = self.encode_audio(audio_paths)
+        else:
+            raise NotImplementedError 
+        input_ids, target_ids,attention_mask = process_batch_stage_1(self.lm_tokenizer,
+                                                                     inputs['output_texts'],
+                                                                     self.max_len,
+                                                                     self.args['prompt'])
+        input_embeds,targets,attention_mask = self.prompt_wrap(mm_embeds,
+                                                               input_ids,
+                                                               target_ids,
+                                                               attention_mask)
+        outputs = self.language_model(inputs_embeds=input_embeds,
+                                      attention_mask=attention_mask,
+                                      return_dict=True,
+                                      output_hidden_states=True,
+                                      labels=targets,)
+        loss = outputs.loss 
+        chosen_tokens = torch.max(outputs.logits,dim=-1)[1][:,1:-1]
+        labels = targets[:,2:]
+        gen_acc = (chosen_tokens.reshape(-1) == labels.reshape(-1)).to(torch.long)
+        valid_mask = (labels != -100).reshape(-1)
+        valid_tokens = gen_acc & valid_mask
+        gen_acc = valid_tokens.sum().item() / (valid_mask.sum().item() + 1.0)
+        return loss,gen_acc
+    
+    def _dec_align_training_stage_2(self,inputs):
+        modality = get_modality(inputs["mm_paths"])
+        if modality  == "image":
+            loss,gen_acc,mse_loss = self._train_with_mode(texts=inputs['output_texts'],
+                                                         modality=modality,
+                                                         num_gen_tokens=self.args['num_gen_img_tokens'],
+                                                         text_hidden_fcs=self.gen_text_hidden_fcs,
+                                                         gen_token_idx=self.args['gen_img_token_idx'],
+                                                         text_emb_layers=self.args['text_emb_to_img_layers'],
+                                                         text_prompt_embeddings=inputs['caption_embs'],
+                                                         stage=self.stage)
+        elif modality  == "video":
+             loss,gen_acc,mse_loss = self._train_with_mode(texts=inputs['output_texts'],
+                                                          modality=modality,
+                                                          num_gen_tokens=self.args['num_gen_video_tokens'],
+                                                          text_hidden_fcs=self.gen_text_hidden_fcs_video,
+                                                          gen_token_idx=self.args['gen_video_token_idx'],
+                                                          text_emb_layers=self.args['text_emb_to_video_layers'],
+                                                          text_prompt_embeddings=inputs['caption_embs'],
+                                                          stage=self.stage)
+        elif modality  == "audio":
+             loss,gen_acc,mse_loss = self._train_with_mode(texts=inputs['output_texts'],
+                                                          modality=modality,
+                                                          num_gen_tokens=self.args['num_gen_audio_tokens'],
+                                                          text_hidden_fcs=self.gen_text_hidden_fcs_audio,
+                                                          gen_token_idx=self.args['gen_audio_token_idx'],
+                                                          text_emb_layers=self.args['text_emb_to_audio_layers'],
+                                                          text_prompt_embeddings=inputs['caption_embs'],
+                                                          stage=self.stage)
+        else:
+            raise NotImplementedError
+        return loss,gen_acc,mse_loss
+    
+    def _instruction_tuning_stage_3(self,inputs):
+        loss =0
+        gen_acc =0
+        mse_loss = []
+        target_modality = self.args['modality']
+        for modality in target_modality:
+                
+            if modality  == "image":
+                _loss,_gen_acc,_mse_loss = self._train_with_mode(inputs['image_output_texts'],
+                                                             None,
+                                                             modality,
+                                                             self.args['num_gen_img_tokens'],
+                                                             self.gen_text_hidden_fcs,
+                                                             self.args['gen_img_token_idx'],
+                                                             self.args['text_emb_to_img_layers'],
+                                                             inputs['image_clip_embs'],
+                                                             stage=self.stage)
+            elif modality  == "video":
+                 _loss,_gen_acc,_mse_loss = self._train_with_mode(inputs['video_output_texts'],
+                                                              None,
+                                                              modality,
+                                                              self.args['num_gen_video_tokens'],
+                                                              self.gen_text_hidden_fcs_video,
+                                                              self.args['gen_video_token_idx'],
+                                                              self.args['text_emb_to_video_layers'],
+                                                              inputs['video_clip_embs'],
+                                                              stage=self.stage)
+            elif modality  == "audio":
+                 _loss,_gen_acc,_mse_loss = self._train_with_mode(inputs['audio_output_texts'],
+                                                              None,
+                                                              modality,
+                                                              self.args['num_gen_audio_tokens'],
+                                                              self.gen_text_hidden_fcs_audio,
+                                                              self.args['gen_audio_token_idx'],
+                                                              self.args['text_emb_to_audio_layers'],
+                                                              inputs['audio_clip_embs'],
+                                                              stage=self.stage)
+            else:
+                image_paths = inputs['text_path_list']
+                img_embeds,_ = self.encode_image(image_paths)
+                _loss1,_gen_acc1,_ = self._train_with_mode(inputs['visual_QA_list'],
+                                                         img_embeds,
+                                                         modality=modality,
+                                                         stage=self.stage)
+                _loss2,_gen_acc2,_ = self._train_with_mode(inputs['output_texts'],
+                                                           None,
+                                                           modality=modality,
+                                                           stage=self.stage)
+                _loss = _loss1 + _loss2
+                _gen_acc = (_gen_acc1 + _gen_acc2) / 2
+            loss += _loss 
+            gen_acc += _gen_acc 
+            mse_loss.append(_mse_loss)
+        gen_acc = gen_acc / len(target_modality)
+        return loss,gen_acc,mse_loss
+    
+    def forward(self,inputs):
+        loss= 0
+        gen_acc= 0
+        mse_loss=None
         
+        if self.stage == 1:
+            loss,gen_acc = self._enc_align_training_stage_1(inputs)
+        elif self.stage == 2:
+            loss,gen_acc = self._dec_align_training_stage_2(inputs)
+        elif self.stage == 3:
+            loss,gen_acc = self._instruction_tuning_stage_3(inputs)
+        else:
+            raise NotImplementedError(f'stage{self.stage} is not implemented, now it only supports [1,2,3]')
+        return loss,gen_acc,mse_loss 
+    
+    def extract_multimodal_feature(self,inputs):
+        features = []
+        if inputs['image_paths']:
+            image_embeds ,_ = self.encode_image(inputs['image_paths'])
+            features.append(image_embeds)
+        if inputs['video_paths']:
+            video_embeds ,_ = self.encode_video(inputs['video_paths'])
+            features.append(video_embeds)
+        if inputs['audio_paths']:
+            audio_embeds ,_ = self.encode_audio(inputs['audio_paths'])
+            features.append(audio_embeds)
+            
+        feature_embeds = torch.cat(features).sum(dim=0).unsqueeze(0)
+        return feature_embeds
+    
+    def _prepare_image_embed(self,text,batch_size):
+        pattern =r'Image?(.*?)<\/Image'
+        matches = re.findall(pattern,text)
+        features = []
+        p_before_token = self.lm_tokenizer('<Img>',
+                                           add_special_tokens=False,
+                                           return_tensors='pt').to(self.device)
+        
+        p_after_token = self.lm_tokenizer('</Img>',
+                                           add_special_tokens=False,
+                                           return_tensors='pt').to(self.device)
+        if self.args['freeze_lm']:
+            p_before_embeds = self.language_model.model.embed_tokens(p_before_token.input_ids).expand(batch_size,-1,-1)
+            p_after_embeds = self.language_model.model.embed_tokens(p_after_token.input_ids).expand(batch_size,-1,-1)
+        else:
+            p_before_embeds = self.language_model.model.model.embed_tokens(p_before_token.input_ids).expand(batch_size,-1,-1)
+            p_after_embeds = self.language_model.model.model.embed_tokens(p_after_token.input_ids).expand(batch_size,-1,-1)
+        for m in matches:
+            print('image path:',m)
+            if m.startswith('temp'):
+                m.os.path.join('../',m)
+                print('image path:',m)
+            _temp_embedding,_ = self.encode_image([m])
+            features.append(_temp_embedding)
+        feature_embeds = torch.cat(features).sum(dim=0).unsqueeze(0)
+        return torch.cat([p_before_embeds,feature_embeds,p_after_embeds],dim=1)
+        
+    
+    def _prepare_video_embed(self,text,batch_size):
+        pattern =r'Video?(.*?)<\/Video'
+        matches = re.findall(pattern,text)
+        features = []
+        p_before_token = self.lm_tokenizer('<Vid>',
+                                           add_special_tokens=False,
+                                           return_tensors='pt').to(self.device)
+        
+        p_after_token = self.lm_tokenizer('</Vid>',
+                                           add_special_tokens=False,
+                                           return_tensors='pt').to(self.device)
+        if self.args['freeze_lm']:
+            p_before_embeds = self.language_model.model.embed_tokens(p_before_token.input_ids).expand(batch_size,-1,-1)
+            p_after_embeds = self.language_model.model.embed_tokens(p_after_token.input_ids).expand(batch_size,-1,-1)
+        else:
+            p_before_embeds = self.language_model.model.model.embed_tokens(p_before_token.input_ids).expand(batch_size,-1,-1)
+            p_after_embeds = self.language_model.model.model.embed_tokens(p_after_token.input_ids).expand(batch_size,-1,-1)
+        for m in matches:
+            print('video path:',m)
+            if m.startswith('temp'):
+                m.os.path.join('../',m)
+                print('video path:',m)
+            _temp_embedding,_ = self.encode_video([m])
+            features.append(_temp_embedding)
+        feature_embeds = torch.cat(features).sum(dim=0).unsqueeze(0)
+        return torch.cat([p_before_embeds,feature_embeds,p_after_embeds],dim=1)
+    
+    
+    def _prepare_image_embed(self,text,batch_size):
+        pattern =r'Audio?(.*?)<\/Audio'
+        matches = re.findall(pattern,text)
+        features = []
+        p_before_token = self.lm_tokenizer('<Aud>',
+                                           add_special_tokens=False,
+                                           return_tensors='pt').to(self.device)
+        
+        p_after_token = self.lm_tokenizer('</Aud>',
+                                           add_special_tokens=False,
+                                           return_tensors='pt').to(self.device)
+        if self.args['freeze_lm']:
+            p_before_embeds = self.language_model.model.embed_tokens(p_before_token.input_ids).expand(batch_size,-1,-1)
+            p_after_embeds = self.language_model.model.embed_tokens(p_after_token.input_ids).expand(batch_size,-1,-1)
+        else:
+            p_before_embeds = self.language_model.model.model.embed_tokens(p_before_token.input_ids).expand(batch_size,-1,-1)
+            p_after_embeds = self.language_model.model.model.embed_tokens(p_after_token.input_ids).expand(batch_size,-1,-1)
+        for m in matches:
+            print('audio path:',m)
+            if m.startswith('temp'):
+                m.os.path.join('../',m)
+                print('audio path:',m)
+            _temp_embedding,_ = self.encode_audio([m])
+            features.append(_temp_embedding)
+        feature_embeds = torch.cat(features).sum(dim=0).unsqueeze(0)
+        return torch.cat([p_before_embeds,feature_embeds,p_after_embeds],dim=1)
+    
     
                
 
