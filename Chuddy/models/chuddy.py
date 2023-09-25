@@ -14,6 +14,7 @@ from layers import *
 from Chuddy.models.diffusion_pipelines.sd_pipeline import StableDiffusionPipeline
 from Chuddy.models.diffusion_pipelines.ad_pipeline import AudioLDM2Pipeline
 from Chuddy.models.diffusion_pipelines.vd_pipeline import TextToVideoSDPipeline
+from transformers import StoppingCriteria, StoppingCriteriaList
 # from Chuddy.models.qformer import BertConfig, BertModel, BertLMHeadModel
 from Chuddy.configuration.configuration import  ModelConfig     ## not yet fully implemented
 from Chuddy.models.visual_model import BeitModel,BeitConfig
@@ -67,6 +68,7 @@ class Chuddy(nn.Module):
         language_model = LlamaForCausalLM.from_pretrained(text_config)
         
         ########===========submodule initialization==========###########
+        imagebind_ckpt_path = config.imagebind_config
         self.visual_encoder, self.visual_hidden_size = imagebind_model.imagebind_huge(pretrained=True, store_path=imagebind_ckpt_path)
         self.lm_tokenizer = LlamaTokenizer.from_pretrained(config.llama_config)
         self.lm_tokenizer.add_special_tokens({'pad_token':'[PAD]'})
