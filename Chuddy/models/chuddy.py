@@ -29,6 +29,24 @@ get_peft_model_state_dict,
 prepare_model_for_int8_training,
 set_peft_model_state_dict,
 )
+
+class StoppingCriteriaSub(StoppingCriteria):
+
+    def __init__(self, stops=[], encounters=1):
+        super().__init__()
+        self.stops = stops
+        self.ENCOUNTERS = encounters
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
+        stop_count = 0
+        for stop in self.stops:
+            # stop_count = torch.all((stop == input_ids[0][-len(stop):])).item()
+            stop_count = (stop == input_ids[0]).sum().item()
+        if stop_count >= self.ENCOUNTERS:
+            return True
+        return False
+
+
 # Main Model class
 class Chuddy(nn.Module):
     def __init__(self,
@@ -36,7 +54,7 @@ class Chuddy(nn.Module):
                  prompt= "",
                  device_8bit=0,
                  lora_r=0,
-                 lora_target_modules=['q_proj','v_proj'],
+                 lora_target_modules=['q_proj','v_proj','k_proj','o_proj'],
                  lora_alpha=16,
                  lora_dropout=0.05,
                  **args,
