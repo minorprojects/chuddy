@@ -6,15 +6,15 @@ from config import *
 
 def parser_args():
     parser = argparse.ArgumentParser(description='train parameters')
-    parser.add_argument('--model', type=str, default='nextgpt')
+    parser.add_argument('--model', type=str, default='chuddy')
     parser.add_argument('--mode', type=str, default='train', help='train or test or validation')
     parser.add_argument('--dataset', type=str, default='cc3m', help='the dataset name, it could be cc3m, webvid, audiocap, instruction')
     parser.add_argument('--data_path', type=str, default='cc3m/cc3m.json')  # training data
     parser.add_argument('--mm_root_path', type=str, default='cc3m/images')  # training data
     parser.add_argument('--embed_path', type=str, default='./embed/')  # the embedding path of video/audio/image caption via text encoder in different diffusion model
     parser.add_argument('--local_rank', default=0, type=int)
-    parser.add_argument('--save_path', type=str, default='../ckpt/delta_ckpt/nextgpt/7b_v0/')
-    parser.add_argument('--log_path', type=str, default='../ckpt/delta_ckpt/nextgpt/7b_v0/log_rest/')
+    parser.add_argument('--save_path', type=str, default='ckpt/delta_ckpt/chuddy/13b_v0/')
+    parser.add_argument('--log_path', type=str, default='ckpt/delta_ckpt/chuddy/13b_v0/log_rest/')
     parser.add_argument('--assets_path', type=str, default='./assets/')
 
     # model configurations
