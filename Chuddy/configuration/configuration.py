@@ -7,7 +7,7 @@ class ModelConfig(nn.Module):
                bert_config = 'bert-base-uncased',
                llama_config = 'meta-llama/Llama-2-13b-chat-hf',
                beit_config = 'microsoft/beit-base-patch16-224-pt22k',
-               imagebind_config = ''
+               imagebind_config = 'https://dl.fbaipublicfiles.com/imagebind/imagebind_huge.pth'
               ):
                 super().__init__()
                 self.bert_config = bert_config
