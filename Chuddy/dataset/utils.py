@@ -1,4 +1,4 @@
-from header import *
+from Chuddy.utils.header import *
 
 
 def process_caption(caption):
