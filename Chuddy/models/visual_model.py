@@ -34,7 +34,7 @@ from transformers.utils import (
     logging,
     replace_return_docstrings,
 )
-from Models.configuration_beit import BeitConfig
+from Chuddy.configuration.configuration_beit import BeitConfig
 
 
 logger = logging.get_logger(__name__)
