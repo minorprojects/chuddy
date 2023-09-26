@@ -655,7 +655,7 @@ class Chuddy(nn.Module):
         feature_embeds = torch.cat(features).sum(dim=0).unsqueeze(0)
         return torch.cat([p_before_embeds,feature_embeds,p_after_embeds],dim=1)
         
-     def prepare_generation_embedding(self, inputs):
+    def prepare_generation_embedding(self, inputs):
         prompt = inputs['prompt']
         text = prompt + '\n### Assistant:'
         print("text prompt: ", text)
