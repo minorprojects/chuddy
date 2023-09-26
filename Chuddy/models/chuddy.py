@@ -110,7 +110,84 @@ class Chuddy(nn.Module):
             for param in self.language_projection.parameters():
                 params.requires_grad=False
         self.input_embeddings = self.language_model.get_input_embeddings()
-                     
+            ###==============================Decoder-side-module-alignment=====================########
+        # alignment module for LLM-to_image adapted from Next-GPT
+        self.sd_ckpt_path = self.args['image_diffusion']
+        self.gen_text_hidden_fcs = nn.ModuleList([])
+        for layer_idx in self.args['text_emb_to_img_layers']:
+            if layer_idx == -1 or layer_idx == self.language_model.config.num_hidden_layers:
+                in_dim = self.language_model.config.hidden_size
+                self.gen_text_hidden_fcs.append(
+                    TextFcLayer(in_dim,768,
+                                num_input_tokens=self.args['num_gen_img_tokens'],
+                                num_output_tokens=self.args['num_clip_tokens'],
+                                mode = self.args['text_fc_to_img_mode'])
+                )
+            elif layer_idx < self.language_model.config.num_hidden_layers:
+                self.gen_text_hidden_fcs.append(
+                  TextFcLayer(self.language_model.config.hidden_size,768,
+                                num_input_tokens=self.args['num_gen_img_tokens'],
+                                num_output_tokens=self.args['num_clip_tokens'],
+                                mode = self.args['text_fc_to_img_mode'])
+            )
+            else: 
+                raise ValueError(f'embedding of layer {layer_idx} was requested but model only has {self.language_model.config.num_hidden_layers}')
+    
+        
+        # alignment module for LLM-to_video adapted from Next-GPT
+        self.sd_ckpt_path = self.args['video_diffusion']
+        self.gen_text_hidden_fcs_video = nn.ModuleList([])
+        for layer_idx in self.args['text_emb_to_video_layers']:
+            if layer_idx == -1 or layer_idx == self.language_model.config.num_hidden_layers:
+                in_dim = self.language_model.config.hidden_size
+                self.gen_text_hidden_fcs_video.append(
+                    TextFcLayer(in_dim,1024,
+                                num_input_tokens=self.args['num_gen_video_tokens'],
+                                num_output_tokens=self.args['num_clip_tokens'],
+                                mode = self.args['text_fc_to_video_mode'])
+                )
+            elif layer_idx < self.language_model.config.num_hidden_layers:
+                self.gen_text_hidden_fcs_video.append(
+                  TextFcLayer(self.language_model.config.hidden_size,1024,
+                                num_input_tokens=self.args['num_gen_video_tokens'],
+                                num_output_tokens=self.args['num_clip_tokens'],
+                                mode = self.args['text_fc_to_video_mode'])
+            )
+            else: 
+                raise ValueError(f'embedding of layer {layer_idx} was requested but model only has {self.language_model.config.num_hidden_layers}')
+    
+         
+        # alignment module for LLM-to_Audio adapted from Next-GPT
+        self.sd_ckpt_path = self.args['audio_diffusion']
+        self.gen_text_hidden_fcs_audio = nn.ModuleList([])
+        for layer_idx in self.args['text_emb_to_audio_layers']:
+            if layer_idx == -1 or layer_idx == self.language_model.config.num_hidden_layers:
+                in_dim = self.language_model.config.hidden_size
+                self.gen_text_hidden_fcs_audio.append(
+                    TextFcLayer(in_dim,512,
+                                num_input_tokens=self.args['num_gen_audio_tokens'],
+                                num_output_tokens=self.args['num_clip_tokens'],
+                                mode = self.args['text_fc_to_audio_mode'])
+                )
+            elif layer_idx < self.language_model.config.num_hidden_layers:
+                self.gen_text_hidden_fcs_audio.append(
+                  TextFcLayer(self.language_model.config.hidden_size,512,
+                                num_input_tokens=self.args['num_gen_audio_tokens'],
+                                num_output_tokens=self.args['num_clip_tokens'],
+                                mode = self.args['text_fc_to_audio_mode'])
+            )
+            else: 
+                raise ValueError(f'embedding of layer {layer_idx} was requested but model only has {self.language_model.config.num_hidden_layers}')
+        
+    
+        if self.args['freeze_output_proj']:
+            for name,params in self.gen_text_hidden_fcs.named_parameters():
+                params.requires_grad = False
+            for name,params in self.gen_text_hidden_fcs_video.named_parameters():
+                params.requires_grad = False
+            for name,params in self.gen_text_hidden_fcs_audio.named_parameters():
+                params.requires_grad = False
+                         
         #####==============Feature Functions===========#####
     def _add_image_token(self):
         self.lm_tokenizer.add_tokens({"<Img>"})
@@ -208,84 +285,7 @@ class Chuddy(nn.Module):
         return inputs_llm,atts_llm
 
 
-    ###==============================Decoder-side-module-alignment=====================########
-    # alignment module for LLM-to_image adapted from Next-GPT
-    self.sd_ckpt_path = self.args['image_diffusion']
-    self.gen_text_hidden_fcs = nn.ModuleList([])
-    for layer_idx in self.args['text_emb_to_img_layers']:
-        if layer_idx == -1 or layer_idx == self.language_model.config.num_hidden_layers:
-            in_dim = self.language_model.config.hidden_size
-            self.gen_text_hidden_fcs.append(
-                TextFcLayer(in_dim,768,
-                            num_input_tokens=self.args['num_gen_img_tokens'],
-                            num_output_tokens=self.args['num_clip_tokens'],
-                            mode = self.args['text_fc_to_img_mode'])
-            )
-        elif layer_idx < self.language_model.config.num_hidden_layers:
-            self.gen_text_hidden_fcs.append(
-              TextFcLayer(self.language_model.config.hidden_size,768,
-                            num_input_tokens=self.args['num_gen_img_tokens'],
-                            num_output_tokens=self.args['num_clip_tokens'],
-                            mode = self.args['text_fc_to_img_mode'])
-        )
-        else: 
-            raise ValueError(f'embedding of layer {layer_idx} was requested but model only has {self.language_model.config.num_hidden_layers}')
 
-    
-    # alignment module for LLM-to_video adapted from Next-GPT
-    self.sd_ckpt_path = self.args['video_diffusion']
-    self.gen_text_hidden_fcs_video = nn.ModuleList([])
-    for layer_idx in self.args['text_emb_to_video_layers']:
-        if layer_idx == -1 or layer_idx == self.language_model.config.num_hidden_layers:
-            in_dim = self.language_model.config.hidden_size
-            self.gen_text_hidden_fcs_video.append(
-                TextFcLayer(in_dim,1024,
-                            num_input_tokens=self.args['num_gen_video_tokens'],
-                            num_output_tokens=self.args['num_clip_tokens'],
-                            mode = self.args['text_fc_to_video_mode'])
-            )
-        elif layer_idx < self.language_model.config.num_hidden_layers:
-            self.gen_text_hidden_fcs_video.append(
-              TextFcLayer(self.language_model.config.hidden_size,1024,
-                            num_input_tokens=self.args['num_gen_video_tokens'],
-                            num_output_tokens=self.args['num_clip_tokens'],
-                            mode = self.args['text_fc_to_video_mode'])
-        )
-        else: 
-            raise ValueError(f'embedding of layer {layer_idx} was requested but model only has {self.language_model.config.num_hidden_layers}')
-
-     
-    # alignment module for LLM-to_Audio adapted from Next-GPT
-    self.sd_ckpt_path = self.args['audio_diffusion']
-    self.gen_text_hidden_fcs_audio = nn.ModuleList([])
-    for layer_idx in self.args['text_emb_to_audio_layers']:
-        if layer_idx == -1 or layer_idx == self.language_model.config.num_hidden_layers:
-            in_dim = self.language_model.config.hidden_size
-            self.gen_text_hidden_fcs_audio.append(
-                TextFcLayer(in_dim,512,
-                            num_input_tokens=self.args['num_gen_audio_tokens'],
-                            num_output_tokens=self.args['num_clip_tokens'],
-                            mode = self.args['text_fc_to_audio_mode'])
-            )
-        elif layer_idx < self.language_model.config.num_hidden_layers:
-            self.gen_text_hidden_fcs_audio.append(
-              TextFcLayer(self.language_model.config.hidden_size,512,
-                            num_input_tokens=self.args['num_gen_audio_tokens'],
-                            num_output_tokens=self.args['num_clip_tokens'],
-                            mode = self.args['text_fc_to_audio_mode'])
-        )
-        else: 
-            raise ValueError(f'embedding of layer {layer_idx} was requested but model only has {self.language_model.config.num_hidden_layers}')
-    
-
-    if self.args['freeze_output_proj']:
-        for name,params in self.gen_text_hidden_fcs.named_parameters():
-            params.requires_grad = False
-        for name,params in self.gen_text_hidden_fcs_video.named_parameters():
-            params.requires_grad = False
-        for name,params in self.gen_text_hidden_fcs_audio.named_parameters():
-            params.requires_grad = False
-            
     
 
     def prompt_wraps(self,input_ids,img_embeds,target_ids,attention_mask):
