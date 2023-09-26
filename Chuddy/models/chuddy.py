@@ -63,8 +63,8 @@ class Chuddy(nn.Module):
         super(Chuddy,self).__init__()
         self.args = args
         ########===========Llama Configuration===============########
-        text_config = LlamaConfig.from_pretrained(config.llama_config)
-        self.text_config = text_config
+        # text_config = LlamaConfig.from_pretrained(config.llama_config)
+        # self.text_config = text_config
         language_model = LlamaForCausalLM.from_pretrained(config.llama_config)
         
         ########===========submodule initialization==========###########
