@@ -30,7 +30,7 @@ from diffusers.utils import (
 )
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
-from diffusers import TextToVideoSDPipelineOutput
+from diffusers.pipelines.text_to_video_synthesis import TextToVideoSDPipelineOutput
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
