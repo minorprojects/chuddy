@@ -217,14 +217,14 @@ class Chuddy(nn.Module):
             in_dim = self.language_model.config.hidden_size
             self.gen_text_hidden_fcs.append(
                 TextFcLayer(in_dim,768,
-                            num_input_tokens=self.args['num_gen_img_tokens'].
+                            num_input_tokens=self.args['num_gen_img_tokens'],
                             num_output_tokens=self.args['num_clip_tokens'],
                             mode = self.args['text_fc_to_img_mode'])
             )
         elif layer_idx < self.language_model.config.num_hidden_layers:
             self.gen_text_hidden_fcs.append(
               TextFcLayer(self.language_model.config.hidden_size,768,
-                            num_input_tokens=self.args['num_gen_img_tokens'].
+                            num_input_tokens=self.args['num_gen_img_tokens'],
                             num_output_tokens=self.args['num_clip_tokens'],
                             mode = self.args['text_fc_to_img_mode'])
         )
@@ -240,14 +240,14 @@ class Chuddy(nn.Module):
             in_dim = self.language_model.config.hidden_size
             self.gen_text_hidden_fcs_video.append(
                 TextFcLayer(in_dim,1024,
-                            num_input_tokens=self.args['num_gen_video_tokens'].
+                            num_input_tokens=self.args['num_gen_video_tokens'],
                             num_output_tokens=self.args['num_clip_tokens'],
                             mode = self.args['text_fc_to_video_mode'])
             )
         elif layer_idx < self.language_model.config.num_hidden_layers:
             self.gen_text_hidden_fcs_video.append(
               TextFcLayer(self.language_model.config.hidden_size,1024,
-                            num_input_tokens=self.args['num_gen_video_tokens'].
+                            num_input_tokens=self.args['num_gen_video_tokens'],
                             num_output_tokens=self.args['num_clip_tokens'],
                             mode = self.args['text_fc_to_video_mode'])
         )
@@ -263,14 +263,14 @@ class Chuddy(nn.Module):
             in_dim = self.language_model.config.hidden_size
             self.gen_text_hidden_fcs_audio.append(
                 TextFcLayer(in_dim,512,
-                            num_input_tokens=self.args['num_gen_audio_tokens'].
+                            num_input_tokens=self.args['num_gen_audio_tokens'],
                             num_output_tokens=self.args['num_clip_tokens'],
                             mode = self.args['text_fc_to_audio_mode'])
             )
         elif layer_idx < self.language_model.config.num_hidden_layers:
             self.gen_text_hidden_fcs_audio.append(
               TextFcLayer(self.language_model.config.hidden_size,512,
-                            num_input_tokens=self.args['num_gen_audio_tokens'].
+                            num_input_tokens=self.args['num_gen_audio_tokens'],
                             num_output_tokens=self.args['num_clip_tokens'],
                             mode = self.args['text_fc_to_audio_mode'])
         )
