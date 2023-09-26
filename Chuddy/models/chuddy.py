@@ -65,7 +65,7 @@ class Chuddy(nn.Module):
         ########===========Llama Configuration===============########
         text_config = LlamaConfig.from_pretrained(config.llama_config)
         self.text_config = text_config
-        language_model = LlamaForCausalLM.from_pretrained(text_config)
+        language_model = LlamaForCausalLM.from_pretrained(config.llama_config)
         
         ########===========submodule initialization==========###########
         imagebind_ckpt_path = config.imagebind_config
