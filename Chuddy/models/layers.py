@@ -45,20 +45,21 @@ class TextFcLayer(nn.Module):
                                              nhead=4)
                    self.model = nn.Linear(hidden_dim,out_dim)
                    self.query_embs = nn.Patameter(torch.randn(1,num_output_tokens,hidden_dim))
-                  elif mode == 'qformer':
-                    hidden_dim = 768
-                    self.fc = nn.Linear(in_dim,hidden_dim)
-                    self.Qformer, self.query_tokens = self.init_qformer(num_output_tokens,hidden_dim)
-                    self.Qformer.cls = None
-                    self.Qformer.bert.embeddings.word_embeddings = None
-                    self.Qformer.bert.embeddings.position_embeddings = None
-                    for layer in self.Qformer.bert.encoder.layer:
-                      layer.output = None
-                      layer.intermediate = None
-                    self.model = nn.Linear(hidden_dim,out_dim)
-                    print('done loading qformer')
-                  else:
-                      raise NotImplementedError(mode)
+                 elif mode == 'qformer':
+                  
+                   hidden_dim = 768
+                   self.fc = nn.Linear(in_dim,hidden_dim)
+                   self.Qformer, self.query_tokens = self.init_qformer(num_output_tokens,hidden_dim)
+                   self.Qformer.cls = None
+                   self.Qformer.bert.embeddings.word_embeddings = None
+                   self.Qformer.bert.embeddings.position_embeddings = None
+                   for layer in self.Qformer.bert.encoder.layer:
+                     layer.output = None
+                     layer.intermediate = None
+                   self.model = nn.Linear(hidden_dim,out_dim)
+                   print('done loading qformer')
+                 else:
+                   raise NotImplementedError(mode)
   
   def forward(self,
               x: torch.Tensor,
