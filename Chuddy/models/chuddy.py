@@ -25,7 +25,7 @@ from Chuddy.utils.util import *
 from Chuddy.utils.header import *
 from peft import (
 LoraConfig,
-get-peft_model,
+get_peft_model,
 get_peft_model_state_dict,
 prepare_model_for_int8_training,
 set_peft_model_state_dict,
