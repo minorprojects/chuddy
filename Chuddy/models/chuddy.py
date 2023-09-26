@@ -65,12 +65,13 @@ class Chuddy(nn.Module):
         ########===========Llama Configuration===============########
         # text_config = LlamaConfig.from_pretrained(config.llama_config)
         # self.text_config = text_config
+        text_config = 'meta-llama/Llama-2-13b-chat-hf'
         language_model = LlamaForCausalLM.from_pretrained('meta-llama/Llama-2-13b-chat-hf')
         
         ########===========submodule initialization==========###########
         imagebind_ckpt_path = config.imagebind_config
         self.visual_encoder, self.visual_hidden_size = imagebind_model.imagebind_huge(pretrained=True, store_path=imagebind_ckpt_path)
-        self.lm_tokenizer = LlamaTokenizer.from_pretrained(config.llama_config)
+        self.lm_tokenizer = LlamaTokenizer.from_pretrained(text_config)
         self.lm_tokenizer.add_special_tokens({'pad_token':'[PAD]'})
         self.lm_tokenizer.add_special_tokens({'bos_token':'</s>'})
         self.lm_tokenizer.add_special_tokens({'eos_token':'</s>'})
