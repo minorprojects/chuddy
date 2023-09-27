@@ -70,7 +70,7 @@ class Chuddy(nn.Module):
         
         ########===========submodule initialization==========###########
         imagebind_ckpt_path = config.imagebind_config
-        self.visual_encoder, self.visual_hidden_size = imagebind_huge(pretrained=True, store_path=imagebind_ckpt_path)
+        self.visual_encoder, self.visual_hidden_size = imagebind_huge(pretrained=True)
         self.lm_tokenizer = LlamaTokenizer.from_pretrained(text_config)
         self.lm_tokenizer.add_special_tokens({'pad_token':'[PAD]'})
         self.lm_tokenizer.add_special_tokens({'bos_token':'</s>'})
