@@ -503,4 +503,4 @@ def imagebind_huge(pretrained=False):
 
         model.load_state_dict(torch.load(".checkpoints/imagebind_huge.pth"))
 
-    return model
+    return model,1024
