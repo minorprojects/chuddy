@@ -66,6 +66,7 @@ class Chuddy(nn.Module):
         # text_config = LlamaConfig.from_pretrained(config.llama_config)
         # self.text_config = text_config
         text_config = 'meta-llama/Llama-2-7b-chat-hf'
+        print('initializing LLM')
         language_model = LlamaForCausalLM.from_pretrained('meta-llama/Llama-2-7b-chat-hf')
         
         ########===========submodule initialization==========###########
@@ -76,7 +77,7 @@ class Chuddy(nn.Module):
         self.lm_tokenizer.add_special_tokens({'bos_token':'</s>'})
         self.lm_tokenizer.add_special_tokens({'eos_token':'</s>'})
         self.lm_tokenizer.add_special_tokens({'unk_token':'</s>'})
-        self.tokenizer.add_special_tokens({"bos_token":"[DEC]"})
+        # self.tokenizer.add_special_tokens({"bos_token":"[DEC]"})
         self._add_image_token()
         self._add_video_token()
         self._add_audio_token()
