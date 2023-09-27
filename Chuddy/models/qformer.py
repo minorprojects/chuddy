@@ -1,4 +1,5 @@
 """
+Adapted from salesforce@LAVIS. Below is the original copyright:
  * Copyright (c) 2023, salesforce.com, inc.
  * All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause
@@ -7,7 +8,6 @@
  * Based on huggingface code base
  * https://github.com/huggingface/transformers/blob/v4.15.0/src/transformers/models/bert
 """
-
 
 import math
 import os
