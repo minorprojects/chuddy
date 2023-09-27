@@ -62,35 +62,30 @@ class Chuddy(nn.Module):
                  ):
         super(Chuddy,self).__init__()
         self.args = args
-        ########===========Llama Configuration===============########
-        # text_config = LlamaConfig.from_pretrained(config.llama_config)
-        # self.text_config = text_config
-        text_config = 'meta-llama/Llama-2-7b-chat-hf'
-        print('initializing LLM')
-        language_model = LlamaForCausalLM.from_pretrained('meta-llama/Llama-2-7b-chat-hf')
-        
         ########===========submodule initialization==========###########
         imagebind_ckpt_path = config.imagebind_config
         self.visual_encoder, self.visual_hidden_size = imagebind_huge(pretrained=True)
+        text_config = 'meta-llama/Llama-2-7b-chat-hf'
         self.lm_tokenizer = LlamaTokenizer.from_pretrained(text_config)
-        self.lm_tokenizer.add_special_tokens({'pad_token':'[PAD]'})
-        self.lm_tokenizer.add_special_tokens({'bos_token':'</s>'})
-        self.lm_tokenizer.add_special_tokens({'eos_token':'</s>'})
-        self.lm_tokenizer.add_special_tokens({'unk_token':'</s>'})
+        self.lm_tokenizer.pad_token = self.lm_tokenizer.eos_token
+        self.lm_tokenizer.padding_side = "right"
+        # self.lm_tokenizer.add_special_tokens({'pad_token':'[PAD]'})
+        # self.lm_tokenizer.add_special_tokens({'bos_token':'</s>'})
+        # self.lm_tokenizer.add_special_tokens({'eos_token':'</s>'})
+        # self.lm_tokenizer.add_special_tokens({'unk_token':'</s>'})
         # self.tokenizer.add_special_tokens({"bos_token":"[DEC]"})
-        self._add_image_token()
-        self._add_video_token()
-        self._add_audio_token()
-        self.language_projection = nn.Linear(self.visual_hidden_size,self.language_model.config.hidden_size) 
-        self.language_model = language_model
-        self.language_model.resize_token_embeddings(len(self.lm_tokenizer))
-
         # freeze vision encoder
         for name,param in self.visual_encoder.named_parameters():
             param.requires_grad = False
         self.visual_encoder = self.visual_encoder.eval()
-            
         logging.info('frozen_vis_encoder enabled')
+        ########===========Llama Configuration===============########
+        # text_config = LlamaConfig.from_pretrained(config.llama_config)
+        # self.text_config = text_config
+        print('initializing LLM')
+        language_model = LlamaForCausalLM.from_pretrained('meta-llama/Llama-2-7b-chat-hf')
+        self.language_model = language_model
+       
         if self.args['freeze_lm']:
             for name,param in self.language_model.named_parameters():
                 param.requires_grad = False
@@ -108,10 +103,17 @@ class Chuddy(nn.Module):
             self.language_model = get_peft_model(self.language_model,peft_config)
             self.language_model.print_trainable_parameters()
         print('LLM initialized')
+      
+        self._add_image_token()
+        self._add_video_token()
+        self._add_audio_token()   
+        self.language_model.resize_token_embeddings(len(self.lm_tokenizer))
+        self.language_projection = nn.Linear(self.visual_hidden_size,self.language_model.config.hidden_size)
         if self.args['freeze_input_proj']:
             for param in self.language_projection.parameters():
                 params.requires_grad=False
         self.input_embeddings = self.language_model.get_input_embeddings()
+        
             ###==============================Decoder-side-module-alignment=====================########
         # alignment module for LLM-to_image adapted from Next-GPT
         self.sd_ckpt_path = self.args['image_diffusion']
