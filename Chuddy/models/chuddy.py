@@ -10,6 +10,7 @@ from typing import Union,Tuple,Optional,Any
 from torch import nn
 import torch.nn.functional as F
 from Chuddy.models.imagebind.imagebind_model import *
+from Chuddy.models.imagebind import data
 from Chuddy.models.layers import *
 from Chuddy.models.diffusion_pipelines.sd_pipeline import StableDiffusionPipeline
 from Chuddy.models.diffusion_pipelines.ad_pipeline import AudioLDM2Pipeline
