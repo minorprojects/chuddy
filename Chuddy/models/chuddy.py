@@ -210,12 +210,12 @@ class Chuddy(nn.Module):
         self.lm_tokenizer.add_tokens({"</Vid>"})
         # add [img] tokens to vocab
         self.args['gen_vid_token_idx']= []
-        for i in range(self.args['num_gen_vid_tokens']):
+        for i in range(self.args['num_gen_video_tokens']):
             print('adding image tokens to vocab')
             num_added_tokens = self.lm_tokenizer.add_tokens(f'[VID{i}]')
             gen_token_idx = self.lm_tokenizer(f'[VID{i}]', add_special_tokens=False).input_ids
             assert len(gen_token_idx) == 1, gen_token_idx
-            self.args['gen_vid_token_idx'].append(gen_token_idx[0])
+            self.args['gen_video_token_idx'].append(gen_token_idx[0])
 
     def _add_audio_token(self):
         self.lm_tokenizer.add_tokens({"<Aud>"})
