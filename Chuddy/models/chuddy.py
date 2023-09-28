@@ -211,7 +211,7 @@ class Chuddy(nn.Module):
         # add [img] tokens to vocab
         self.args['gen_video_token_idx']= []
         for i in range(self.args['num_gen_video_tokens']):
-            print('adding image tokens to vocab')
+            print('adding video tokens to vocab')
             num_added_tokens = self.lm_tokenizer.add_tokens(f'[VID{i}]')
             gen_token_idx = self.lm_tokenizer(f'[VID{i}]', add_special_tokens=False).input_ids
             assert len(gen_token_idx) == 1, gen_token_idx
@@ -223,7 +223,7 @@ class Chuddy(nn.Module):
         # add [img] tokens to vocab
         self.args['gen_audio_token_idx']= []
         for i in range(self.args['num_gen_audio_tokens']):
-            print('adding image tokens to vocab')
+            print('adding audio tokens to vocab')
             num_added_tokens = self.lm_tokenizer.add_tokens(f'[AUD{i}]')
             gen_token_idx = self.lm_tokenizer(f'[AUD{i}]', add_special_tokens=False).input_ids
             assert len(gen_token_idx) == 1, gen_token_idx
@@ -259,7 +259,7 @@ class Chuddy(nn.Module):
             embeddings = self.visual_encoder(inputs)
             image_embeds = embeddings['vision']
         inputs_llm = self.language_projection(image_embeds).unsqueeze(1)
-        atts_llm = torch.ones(inputs_llm.size()[:-1],dtype=torch.long).to(self.ddevice)
+        atts_llm = torch.ones(inputs_llm.size()[:-1],dtype=torch.long).to(self.device)
         return inputs_llm,atts_llm
 
     
@@ -272,7 +272,7 @@ class Chuddy(nn.Module):
             embeddings = self.visual_encoder(inputs)
             video_embeds = embeddings[ModalityType.VISION]
         inputs_llm = self.language_projection(video_embeds).unsqueeze(1)
-        atts_llm = torch.ones(inputs_llm.size()[:-1],dtype=torch.long).to(self.ddevice)
+        atts_llm = torch.ones(inputs_llm.size()[:-1],dtype=torch.long).to(self.device)
         return inputs_llm,atts_llm
 
     
@@ -285,7 +285,7 @@ class Chuddy(nn.Module):
             embeddings = self.visual_encoder(inputs)
             audio_embeds = embeddings[ModalityType.AUDIO]
         inputs_llm = self.language_projection(audio_embeds).unsqueeze(1)
-        atts_llm = torch.ones(inputs_llm.size()[:-1],dtype=torch.long).to(self.ddevice)
+        atts_llm = torch.ones(inputs_llm.size()[:-1],dtype=torch.long).to(self.device)
         return inputs_llm,atts_llm
 
 
