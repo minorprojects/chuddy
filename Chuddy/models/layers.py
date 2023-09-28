@@ -44,7 +44,7 @@ class TextFcLayer(nn.Module):
                                              dropout=0.0,
                                              nhead=4)
                    self.model = nn.Linear(hidden_dim,out_dim)
-                   self.query_embs = nn.Patameter(torch.randn(1,num_output_tokens,hidden_dim))
+                   self.query_embs = nn.Parameter(torch.randn(1,num_output_tokens,hidden_dim))
                  elif mode == 'qformer':
                   
                    hidden_dim = 768
