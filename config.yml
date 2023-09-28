@@ -34,13 +34,13 @@ text_fc_to_img_mode: transformer  #  [qformer, transformer]
 # ========= text-to-video alignment tuning ========== #
 n_video_tokens: 24
 text_emb_to_video_layers: [-1]
-num_gen_video_tokens: 24
+num_gen_vid_tokens: 24
 text_fc_to_video_mode: transformer  # [qformer, transformer]
 
 # ========= text-to-audio alignment tuning ========== #
 n_audio_tokens: 8
 text_emb_to_audio_layers: [-1]
-num_gen_audio_tokens: 8
+num_gen_aud_tokens: 8
 text_fc_to_audio_mode: transformer  # [qformer, transformer]
 
 # ========= image diffusion model ========== #
