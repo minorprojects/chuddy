@@ -62,6 +62,9 @@ class Chuddy(nn.Module):
                  ):
         super(Chuddy,self).__init__()
         self.args = args
+        self.max_length = args['max_length']
+        # self.device = torch.cuda.current_device()
+        self.stage = args['stage']
         ########===========submodule initialization==========###########
         imagebind_ckpt_path = config.imagebind_config
         self.visual_encoder, self.visual_hidden_size = imagebind_huge(pretrained=True)
