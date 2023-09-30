@@ -58,11 +58,12 @@ if __name__ == '__main__':
     name_list = []
     if modality == 'audio':
         print('extract audio caption embedding')
-        with open(data_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
+        # with open(data_path, 'r', encoding='utf-8') as f:
+        #     data = json.load(f)
+        dataset = AudioCaps(download=True)
+        data = dataset[0]
         for row in tqdm(data, total=len(data)):
-            one_audio_name, one_caption = row["audio_name"], row["caption"]
+            one_audio_name, one_caption = row["audio"], row["captions"]
             if one_audio_name not in existing_files:
                 caption_list.append(one_caption)
                 name_list.append(one_audio_name)
@@ -73,8 +74,9 @@ if __name__ == '__main__':
             pipe = pipe.to("cuda")
     elif modality == 'image':
         print('extract image caption embedding')
-        with open(data_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        # with open(data_path, 'r', encoding='utf-8') as f:
+        #     data = json.load(f)
+        
         for row in tqdm(data, total=len(data)):
             one_image_name, one_caption = row["image_name"], row["caption"]
             if one_image_name not in existing_files:
