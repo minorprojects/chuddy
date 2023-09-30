@@ -30,7 +30,7 @@ from datasets.utils.file_utils import get_datasets_user_agent
 USER_AGENT = get_datasets_user_agent()
 
 
-def fetch_single_image(image_url, timeout=None, retries=0):
+def _fetch_single_image(image_url, timeout=None, retries=0):
     for _ in range(retries + 1):
         try:
             request = urllib.request.Request(
@@ -46,7 +46,7 @@ def fetch_single_image(image_url, timeout=None, retries=0):
     return image
 
 
-def fetch_images(batch, num_threads, timeout=None, retries=0):
+def _fetch_images(batch, num_threads, timeout=None, retries=0):
     fetch_single_image_with_args = partial(fetch_single_image, timeout=timeout, retries=retries)
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         batch["image"] = list(executor.map(fetch_single_image_with_args, batch["image_url"]))
@@ -55,9 +55,9 @@ def fetch_images(batch, num_threads, timeout=None, retries=0):
 
 
 
-class CC12MDataset(BaseDataset):
+class CC12MDataset(torch.utils.data.DataLoader):
     def __init__(self, data_path,mm_root_path: str, embed_path: str, train: bool = True, img_transform=None):
-        super(CC12MDataset,self).__init__(data_path,mm_root_path,embed_path)
+        super(CC12MDataset,self).__init__()
         split = "train" if train else "validation"
 
         self.urls = data_path[f"{split}"]['image_url']
@@ -75,8 +75,10 @@ class CC12MDataset(BaseDataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        self.mm_path_list, self.caption_list = [], []
         img = _fetch_single_image(self.urls[idx])
+        with open(os.path.join(self.embed_path, str(os.path.basename(img)) + '.npy'), 'rb') as f:
+            caption_embs = torch.from_numpy(np.load(f, allow_pickle=True)) 
+        
         if img is None:
             return None
         elif self.img_transform:
@@ -88,27 +90,12 @@ class CC12MDataset(BaseDataset):
         elif img.shape[0] != 3:
             return None
 
-        return {'image': img, 'encoding': enc, 'mask': msk}
+        return dict(mm_paths=img, output_texts=self.captions[idx], caption_embs=caption_embs)
 
 num_threads = 20
 dset = load_dataset("conceptual_12m")
 dset = dset.map(fetch_images, batched=True, batch_size=100, fn_kwargs={"num_threads": num_threads})
 
 
-class CC3MDataset(BaseDataset):
-    """Dataset for supervised fine-tuning."""
-
-    def __init__(self, data_path: str, mm_root_path: str, embed_path: str):
-        super(CC3MDataset, self).__init__(data_path, mm_root_path, embed_path)
-        self.embed_path = embed_path
-
-        print('Load CC3M dataset ...')
         
-        with open(data_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        for row in tqdm(data, total=len(data)):
-            image_id, one_caption = row["image_name"], row["caption"]
-            self.mm_path_list.append(os.path.join(mm_root_path, image_id))
-            self.caption_list.append(process_caption(one_caption))
 
-        print(f'[!] collect {len(self.mm_path_list)} samples for training')
