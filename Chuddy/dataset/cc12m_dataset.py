@@ -47,7 +47,7 @@ def _fetch_single_image(image_url, timeout=None, retries=0):
 
 
 def _fetch_images(batch, num_threads, timeout=None, retries=0):
-    fetch_single_image_with_args = partial(fetch_single_image, timeout=timeout, retries=retries)
+    fetch_single_image_with_args = partial(_fetch_single_image, timeout=timeout, retries=retries)
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         batch["image"] = list(executor.map(fetch_single_image_with_args, batch["image_url"]))
     return batch
@@ -94,7 +94,7 @@ class CC12MDataset(torch.utils.data.DataLoader):
 
 num_threads = 20
 dset = load_dataset("conceptual_12m")
-dset = dset.map(fetch_images, batched=True, batch_size=100, fn_kwargs={"num_threads": num_threads})
+dset = dset.map(_fetch_images, batched=True, batch_size=100, fn_kwargs={"num_threads": num_threads})
 
 
         
