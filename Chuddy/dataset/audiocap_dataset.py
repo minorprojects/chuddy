@@ -31,7 +31,7 @@ from .base_dataset import BaseDataset
 from tqdm import tqdm
 import pandas as pd
 from .utils import process_caption
-
+from acc_datasets import AudioCaps
 
 class AudioCapDataset(BaseDataset):
     """Dataset for supervised fine-tuning."""
@@ -51,4 +51,23 @@ class AudioCapDataset(BaseDataset):
 
         print(f'[!] collect {len(self.mm_path_list)} samples for training')
 
+class AudioDataset(torch.utils.data.DataLoader):
+    def __init__(self, data_path,mm_root_path: str, embed_path: str):
+        super(AudioDataset,self).__init__()
+        # split = "train" if train else "validation"
+        data = data_path[0]
+        self.audio = data_path['audio']
+        self.captions = data_path['captions']
 
+    def __len__(self):
+        return len(self.audio)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        with open(os.path.join(self.embed_path, str(os.path.basename(img)) + '.npy'), 'rb') as f:
+            caption_embs = torch.from_numpy(np.load(f, allow_pickle=True)) 
+
+        return dict(mm_paths=self.audio[idx], output_texts=self.captions[idx], caption_embs=caption_embs)
+
+dataset = AudioCaps(root=".", download=True)
