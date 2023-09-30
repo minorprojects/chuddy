@@ -25,7 +25,7 @@ from datasets.utils.file_utils import get_datasets_user_agent
 from resize_right import resize
 from datasets import load_dataset
 from datasets.utils.file_utils import get_datasets_user_agent
-
+from .utils import _Rescale
 
 USER_AGENT = get_datasets_user_agent()
 
@@ -56,7 +56,7 @@ def _fetch_images(batch, num_threads, timeout=None, retries=0):
 
 
 class CC12MDataset(torch.utils.data.DataLoader):
-    def __init__(self, data_path,mm_root_path: str, embed_path: str, train: bool = True, img_transform=None):
+    def __init__(self, data_path,mm_root_path: str, embed_path: str, side_length: int, train: bool = True, img_transform=None):
         super(CC12MDataset,self).__init__()
         split = "train" if train else "validation"
 
@@ -67,7 +67,7 @@ class CC12MDataset(torch.utils.data.DataLoader):
             self.img_transform = Compose([ToTensor(), _Rescale(side_length)])
         else:
             self.img_transform = Compose([ToTensor(), _Rescale(side_length), img_transform])
-        self.max_length = max_length
+        # self.max_length = max_length
 
     def __len__(self):
         return len(self.urls)
