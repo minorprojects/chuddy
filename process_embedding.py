@@ -36,6 +36,10 @@ from resize_right import resize
 from datasets import load_dataset
 from datasets.utils.file_utils import get_datasets_user_agent
 from Chuddy.dataset.utils import _Rescale
+num_threads = 20
+dset = load_dataset("conceptual_12m")
+dset = dset.map(_fetch_images, batched=True, batch_size=100, fn_kwargs={"num_threads": num_threads})
+
 
 USER_AGENT = get_datasets_user_agent()
 
@@ -130,9 +134,9 @@ if __name__ == '__main__':
         print('extract image caption embedding')
         # with open(data_path, 'r', encoding='utf-8') as f:
         #     data = json.load(f)
-        
+        data = dset['train']
         for row in tqdm(data, total=len(data)):
-            one_image_name, one_caption = row["image_name"], row["caption"]
+            one_image_name, one_caption = _fetch_single_image(row["image_url"]), row["captions"]
             if one_image_name not in existing_files:
                 caption_list.append(one_caption)
                 name_list.append(one_image_name)
