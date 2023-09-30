@@ -1,7 +1,7 @@
 from Chuddy.utils.header import *
 from einops import rearrange
 import torch
-
+from resize_rigth import resize
 def process_caption(caption):
     caption = re.sub(
         r"([\"()*#:;~])",
