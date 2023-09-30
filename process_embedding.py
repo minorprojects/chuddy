@@ -9,6 +9,60 @@ import json
 import pandas as pd
 import argparse
 
+import inspect
+import json
+import os
+import signal
+from argparse import ArgumentParser
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from functools import partial
+import io
+import urllib
+from typing import Literal
+
+from tqdm import tqdm
+
+import datasets
+import PIL.Image
+from einops import rearrange
+import torch.utils.data
+import torch.nn.functional as F
+from torchvision.transforms import Compose, ToTensor
+
+from datasets import load_dataset
+from datasets.utils.file_utils import get_datasets_user_agent
+from resize_right import resize
+from datasets import load_dataset
+from datasets.utils.file_utils import get_datasets_user_agent
+from Chuddy.dataset.utils import _Rescale
+
+USER_AGENT = get_datasets_user_agent()
+
+
+def _fetch_single_image(image_url, timeout=None, retries=0):
+    for _ in range(retries + 1):
+        try:
+            request = urllib.request.Request(
+                image_url,
+                data=None,
+                headers={"user-agent": USER_AGENT},
+            )
+            with urllib.request.urlopen(request, timeout=timeout) as req:
+                image = PIL.Image.open(io.BytesIO(req.read()))
+            break
+        except Exception:
+            image = None
+    return image
+
+
+def _fetch_images(batch, num_threads, timeout=None, retries=0):
+    fetch_single_image_with_args = partial(_fetch_single_image, timeout=timeout, retries=retries)
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        batch["image"] = list(executor.map(fetch_single_image_with_args, batch["image_url"]))
+    return batch
+
+
 # Load a slightly modified version of the Stable Diffusion pipeline.
 # This allows us to extract text embeddings directly (without generating images).
 from Chuddy.models.diffusion_pipelines.sd_pipeline import StableDiffusionPipeline
