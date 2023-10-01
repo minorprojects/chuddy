@@ -37,8 +37,8 @@ from datasets import load_dataset
 from datasets.utils.file_utils import get_datasets_user_agent
 from Chuddy.dataset.utils import _Rescale
 num_threads = 20
-dset = load_dataset("conceptual_12m")
-dset = dset.map(_fetch_images, batched=True, batch_size=100, fn_kwargs={"num_threads": num_threads})
+# dset = load_dataset("conceptual_12m")
+
 
 
 USER_AGENT = get_datasets_user_agent()
@@ -101,10 +101,10 @@ if __name__ == '__main__':
     # video_generation_ckpt_path = 'cerspense/zeroscope_v2_576w'
     # audio_generation_ckpt_path = 'cvssp/audioldm-l-full'
 
-    data_path = sys.argv[1]
-    modality = sys.argv[2]
-    clip_output_dir = sys.argv[3]
-    ckpt_path = sys.argv[4]
+    # data_path = sys.argv[1]
+    modality = sys.argv[1]
+    clip_output_dir = sys.argv[2]
+    ckpt_path = sys.argv[3]
 
     if not os.path.exists(clip_output_dir):
         os.makedirs(clip_output_dir, exist_ok=True)
@@ -134,6 +134,8 @@ if __name__ == '__main__':
         print('extract image caption embedding')
         # with open(data_path, 'r', encoding='utf-8') as f:
         #     data = json.load(f)
+        dset = load_dataset('conceptual_12m')
+        dset = dset.map(_fetch_images, batched=True, batch_size=100, fn_kwargs={"num_threads": num_threads})
         data = dset['train']
         for row in tqdm(data, total=len(data)):
             one_image_name, one_caption = _fetch_single_image(row["image_url"]), row["captions"]
@@ -147,10 +149,12 @@ if __name__ == '__main__':
             pipe = pipe.to("cuda")
     elif modality == 'video':
         print('extract video caption embedding')
-        with open(data_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        # with open(data_path, 'r', encoding='utf-8') as f:
+        #     data = json.load(f)
+        dset = load_dataset('HuggingFaceM4/webvid')
+        data = dset['train']
         for row in tqdm(data, total=len(data)):
-            one_video_name, one_caption = row["video_name"], row["caption"]
+            one_video_name, one_caption = row["contentUrl"], row["name"]
             if one_video_name not in existing_files:
                 caption_list.append(one_caption)
                 name_list.append(one_video_name)
