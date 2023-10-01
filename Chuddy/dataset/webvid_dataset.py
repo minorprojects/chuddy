@@ -41,3 +41,23 @@ class WebvidDataset(BaseDataset):
             self.caption_list.append(process_caption(one_caption))
 
         print(f'[!] collect {len(self.mm_path_list)} samples for training')
+
+class VideoDataset(torch.utils.data.DataLoader):
+    def __init__(self, data_path,mm_root_path: str, embed_path: str):
+        super(VideoDataset,self).__init__()
+        # split = "train" if train else "validation"
+        data = data_path['train']
+        self.video = data_path['contentUrl']
+        self.captions = data_path['name']
+
+    def __len__(self):
+        return len(self.videoo)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        with open(os.path.join(self.embed_path, str(os.path.basename(img)) + '.npy'), 'rb') as f:
+            caption_embs = torch.from_numpy(np.load(f, allow_pickle=True)) 
+
+        return dict(mm_paths=self.video[idx], output_texts=self.captions[idx], caption_embs=caption_embs)
+
