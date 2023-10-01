@@ -71,7 +71,7 @@ def _fetch_images(batch, num_threads, timeout=None, retries=0):
 # This allows us to extract text embeddings directly (without generating images).
 from Chuddy.models.diffusion_pipelines.sd_pipeline import StableDiffusionPipeline
 from Chuddy.models.diffusion_pipelines.vd_pipeline import TextToVideoSDPipeline
-from Chuddy.models.diffusion_pipelines.ad_pipeline import AudioLDMPipeline
+from Chuddy.models.diffusion_pipelines.ad_pipeline import AudioLDM2Pipeline
 
 
 
@@ -125,7 +125,7 @@ if __name__ == '__main__':
             if one_audio_name not in existing_files:
                 caption_list.append(one_caption)
                 name_list.append(one_audio_name)
-        pipe = AudioLDMPipeline.from_pretrained(ckpt_path, torch_dtype=dtype)
+        pipe = AudioLDM2Pipeline.from_pretrained(ckpt_path, torch_dtype=dtype)
         if not torch.cuda.is_available():
             print('WARNING: using CPU, this will be slow!')
         else:
