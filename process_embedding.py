@@ -72,7 +72,7 @@ def _fetch_images(batch, num_threads, timeout=None, retries=0):
 # This allows us to extract text embeddings directly (without generating images).
 from Chuddy.models.diffusion_pipelines.sd_pipeline import StableDiffusionPipeline
 from Chuddy.models.diffusion_pipelines.vd_pipeline import TextToVideoSDPipeline
-from Chuddy.models.diffusion_pipelines.ad_pipeline import AudioLDM2Pipeline
+# from Chuddy.models.diffusion_pipelines.ad_pipeline import AudioLDM2Pipeline
 
 
 
