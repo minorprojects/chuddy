@@ -171,7 +171,7 @@ if __name__ == '__main__':
         start_idx = i * batch_size
         end_idx = start_idx + batch_size
         batch_captions = caption_list[start_idx:end_idx]
-        batch_ids = name_list[start_idx:end_idx]
+        batch_ids = name_list[8:-4]
         prompt_embeds = pipe(batch_captions, return_prompts_only=True).detach().cpu().numpy()
 
         # Save embeddings to disk in parallel.
