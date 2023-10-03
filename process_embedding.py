@@ -1,4 +1,4 @@
-
+import aac_datasets
 import numpy as np
 import os
 import sys
@@ -37,6 +37,7 @@ from datasets import load_dataset
 from datasets.utils.file_utils import get_datasets_user_agent
 from Chuddy.dataset.utils import _Rescale
 num_threads = 20
+from aac_datasets import AudioCaps
 # dset = load_dataset("conceptual_12m")
 
 
